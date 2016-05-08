@@ -64,8 +64,8 @@ func NewRequestMsg(kademlia_type int, id int, req_data interface{}) KademliaMess
 type KademliaRPCClient struct {
 	wait_response map[int] *KademliaCall
 	CallChan      chan *KademliaCall
-	ResMsgChan    <-chan *KademliaMessage
-	ReqMsgChan    chan<- *KademliaMessage
+	ResMsgChan    chan *KademliaMessage
+	ReqMsgChan    chan *KademliaMessage
 }
 
 type KademliaCall struct {
@@ -189,8 +189,8 @@ func (c *KademliaRPCClient) Ping(req kademlia.PingRequest, res *kademlia.PingRes
 //===============================================================================
 
 type KademliaRPCHandler struct {
-	ReqMsgChan <-chan *KademliaMessage
-	ResMsgChan chan<- *KademliaMessage
+	ReqMsgChan chan *KademliaMessage
+	ResMsgChan chan *KademliaMessage
 
 	kad        kademlia.KademliaNodeHandler
 }
