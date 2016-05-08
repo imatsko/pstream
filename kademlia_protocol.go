@@ -31,17 +31,32 @@ type KademliaMessage struct {
 	Error error
 }
 
-
-type KademliaCall struct {
-	KademliaType int
-	Ts time.Time
-	Id int
-	ReqData interface{}
-	ResData chan interface{}
-	ResError chan interface{}
+func NewResponseMsg(req *KademliaMessage, data interface{}, err error) KademliaMessage {
+	res := KademliaMessage{}
+	res.Id = req.Id
+	switch req.KademliaType {
+	case KAD_FIND_NODE_REQ:
+		res.KademliaType = KAD_FIND_NODE_RES
+	case KAD_FIND_VALUE_REQ:
+		res.KademliaType = KAD_FIND_VALUE_RES
+	case KAD_STORE_VALUE_REQ:
+		res.KademliaType = KAD_STORE_VALUE_RES
+	case KAD_PING_REQ:
+		res.KademliaType = KAD_PING_RES
+	}
+	res.Data = data
+	res.Error = err
+	return res
 }
 
-
+func NewRequestMsg(kademlia_type int, id int, req_data interface{}) KademliaMessage {
+	req := KademliaMessage{}
+	req.TypeID = PROTO_KADEMLIA
+	req.Id = id
+	req.KademliaType = kademlia_type
+	req.Data = req_data
+	return req
+}
 
 
 //===============================================================================
@@ -53,6 +68,15 @@ type RPCClient struct {
 	CallChan chan *KademliaCall
 	ResChan <-chan *KademliaMessage
 	ReqChan chan<- *KademliaMessage
+}
+
+type KademliaCall struct {
+	KademliaType int
+	Ts time.Time
+	Id int
+	ReqData interface{}
+	ResData chan interface{}
+	ResError chan interface{}
 }
 
 func (c *RPCClient) CallRPC(req_type int, req interface{}) (res interface{}, err error) {
@@ -86,7 +110,7 @@ func (c *RPCClient) ServeClient() {
 		select {
 		case call := <- c.CallChan:
 			c.wait_response[call.Id] = call
-			req := MakeReq(call.KademliaType, call.Id, call.ReqData)
+			req := NewRequestMsg(call.KademliaType, call.Id, call.ReqData)
 			c.ReqChan <- &req
 		case res := <- c.ResChan:
 			if call, ok := c.wait_response[res.Id]; ok {
@@ -107,15 +131,6 @@ func (c *RPCClient) ServeClient() {
 
 	}
 }
-
-func MakeReq(kademlia_type int, id int, req_data interface{}) KademliaMessage {
-	req := KademliaMessage{}
-	req.Id = id
-	req.KademliaType = kademlia_type
-	req.Data = req_data
-	return req
-}
-
 
 func (c *RPCClient) FindNode(req kademlia.FindNodeRequest, res *kademlia.FindNodeResponse) (err error) {
 	call_res, err := c.CallRPC(KAD_FIND_NODE_REQ, req)
@@ -207,41 +222,62 @@ func (c *RPCConnectionHandler) findNodeHandler(req *KademliaMessage) {
 		call_res := kademlia.FindNodeResponse{}
 		err := c.kad.FindNodeHandler(call_req, &call_res)
 		if err != nil {
-			res = MakeRes(req, nil, err)
+			res = NewResponseMsg(req, nil, err)
 		} else {
-			res = MakeRes(req, call_res, nil)
+			res = NewResponseMsg(req, call_res, nil)
 		}
 	} else {
-		res = MakeRes(req, nil, errors.New("Request data type mismatch"))
+		res = NewResponseMsg(req, nil, errors.New("Request data type mismatch"))
 	}
 	c.ResMsgChan <- &res
 }
 
-func (c *RPCConnectionHandler) findValueHandler(msg *KademliaMessage) {
-}
-
-func (c *RPCConnectionHandler) storeValueHandler(msg *KademliaMessage) {
-}
-
-func (c *RPCConnectionHandler) pingHandler(msg *KademliaMessage) {
-}
-
-func MakeRes(req *KademliaMessage, data interface{}, err error) KademliaMessage {
-	res := KademliaMessage{}
-	res.Id = req.Id
-	switch req.KademliaType {
-	case KAD_FIND_NODE_REQ:
-		res.KademliaType = KAD_FIND_NODE_RES
-	case KAD_FIND_VALUE_REQ:
-		res.KademliaType = KAD_FIND_VALUE_RES
-	case KAD_STORE_VALUE_REQ:
-		res.KademliaType = KAD_STORE_VALUE_RES
-	case KAD_PING_REQ:
-		res.KademliaType = KAD_PING_RES
+func (c *RPCConnectionHandler) findValueHandler(req *KademliaMessage) {
+	var res KademliaMessage
+	if call_req, ok := req.Data.(kademlia.FindValueRequest); ok {
+		call_res := kademlia.FindValueResponse{}
+		err := c.kad.FindValueHandler(call_req, &call_res)
+		if err != nil {
+			res = NewResponseMsg(req, nil, err)
+		} else {
+			res = NewResponseMsg(req, call_res, nil)
+		}
+	} else {
+		res = NewResponseMsg(req, nil, errors.New("Request data type mismatch"))
 	}
-	res.Data = data
-	res.Error = err
-	return res
+	c.ResMsgChan <- &res
+}
+
+func (c *RPCConnectionHandler) storeValueHandler(req *KademliaMessage) {
+	var res KademliaMessage
+	if call_req, ok := req.Data.(kademlia.StoreValueRequest); ok {
+		call_res := kademlia.StoreValueResponse{}
+		err := c.kad.StoreValueHandler(call_req, &call_res)
+		if err != nil {
+			res = NewResponseMsg(req, nil, err)
+		} else {
+			res = NewResponseMsg(req, call_res, nil)
+		}
+	} else {
+		res = NewResponseMsg(req, nil, errors.New("Request data type mismatch"))
+	}
+	c.ResMsgChan <- &res
+}
+
+func (c *RPCConnectionHandler) pingHandler(req *KademliaMessage) {
+	var res KademliaMessage
+	if call_req, ok := req.Data.(kademlia.PingRequest); ok {
+		call_res := kademlia.PingResponse{}
+		err := c.kad.PingHandler(call_req, &call_res)
+		if err != nil {
+			res = NewResponseMsg(req, nil, err)
+		} else {
+			res = NewResponseMsg(req, call_res, nil)
+		}
+	} else {
+		res = NewResponseMsg(req, nil, errors.New("Request data type mismatch"))
+	}
+	c.ResMsgChan <- &res
 }
 
 
