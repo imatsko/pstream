@@ -10,6 +10,7 @@ type GobNetworkConnection struct {
 	Stream   net.Conn
 	recvChan chan ProtocolMessage
 	sendChan chan ProtocolMessage
+	quit     chan bool
 }
 
 func StartGobNetworkConnection(conn net.Conn) (c *GobNetworkConnection) {
@@ -17,6 +18,7 @@ func StartGobNetworkConnection(conn net.Conn) (c *GobNetworkConnection) {
 	c.Stream = conn
 	c.recvChan = make(chan ProtocolMessage)
 	c.sendChan = make(chan ProtocolMessage)
+	c.quit = make(chan bool)
 	go c.Serve()
 	return
 }
@@ -24,9 +26,20 @@ func StartGobNetworkConnection(conn net.Conn) (c *GobNetworkConnection) {
 func (c *GobNetworkConnection) ServeRecv() {
 	decoder := gob.NewDecoder(c.Stream)
 	for {
+		select {
+		case <-c.quit:
+			log.Printf("quit recv received")
+			close(c.recvChan)
+			return
+		default:
+		}
 		var recvMessage ProtocolMessage
 		err := decoder.Decode(&recvMessage)
 		if err != nil {
+			if err.Error() == "EOF" {
+				log.Printf("ERR: EOF")
+				notify_quit(c.quit)
+			}
 			log.Printf("ERR: input decode err %#v", err)
 			continue
 		}
@@ -39,6 +52,13 @@ func (c *GobNetworkConnection) ServeRecv() {
 func (c *GobNetworkConnection) ServeSend() {
 	encoder := gob.NewEncoder(c.Stream)
 	for {
+		select {
+		case <-c.quit:
+			log.Printf("quit send received")
+			close(c.sendChan)
+			return
+		default:
+		}
 		sendMessage := <-c.sendChan
 		log.Printf("send msg %#v", sendMessage)
 

@@ -4,9 +4,7 @@ import (
 	"github.com/imatsko/pstream"
 	"net"
 	"fmt"
-	_"encoding/gob"
 	"flag"
-	_"log"
 	"bufio"
 	"os"
 )
@@ -27,6 +25,13 @@ func client(remoteAddress string) {
 
 	echo_proto_client := pstream.StartEchoClientProtoHandler()
 	s.Register(1, echo_proto_client)
+	go func() {
+		for {
+			if _, ok := <-echo_proto_client.Quit; !ok {
+				panic("client closed")
+			}
+		}
+	}()
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
