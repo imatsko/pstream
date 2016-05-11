@@ -35,7 +35,7 @@ type ProtocolNetworkConnection interface {
 
 type ProtocolServer struct {
 	network ProtocolNetworkConnection
-	// TODO: concurrent map
+	// TODO: concurrent map https://github.com/streamrail/concurrent-map
 	serve_map map[int]ProtoHandler
 	quit      chan bool
 }
