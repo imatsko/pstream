@@ -8,7 +8,7 @@ import (
 
 var log = logging.MustGetLogger("StreamBuffer")
 
-type StreamChunk struct {
+type Chunk struct {
 	Id   uint64
 	Data interface{}
 }
@@ -21,35 +21,30 @@ const (
 	sb_cmd_state           = 1
 )
 
-type streamBufferCmd struct {
-	cmdId int
-	args  interface{}
-	resp  chan interface{}
-}
 
-type StreamBufferState struct {
+type BufferState struct {
 	LastId uint64
 	Chunks []uint64
 }
 
-type StreamBuffer struct {
-	buf    []*StreamChunk
+type Buffer struct {
+	buf    []*Chunk
 	lastId uint64
-	cmd_ch chan streamBufferCmd
-	BufOut chan<- *StreamChunk
-	BufIn  <-chan *StreamChunk
+	cmd_ch chan command
+	BufOut chan<- *Chunk
+	BufIn  <-chan *Chunk
 }
 
-func NewStreamBuffer(in <-chan *StreamChunk, out chan<- *StreamChunk) *StreamBuffer {
-	sb := new(StreamBuffer)
-	sb.buf = make([]*StreamChunk, 0, SB_SIZE)
-	sb.cmd_ch = make(chan streamBufferCmd)
+func NewBuffer(in <-chan *Chunk, out chan<- *Chunk) *Buffer {
+	sb := new(Buffer)
+	sb.buf = make([]*Chunk, 0, SB_SIZE)
+	sb.cmd_ch = make(chan command)
 	sb.BufOut = out
 	sb.BufIn = in
 	return sb
 }
 
-func (sb *StreamBuffer) insert(c *StreamChunk) bool {
+func (sb *Buffer) insert(c *Chunk) bool {
 	if len(sb.buf) == 0 {
 		sb.buf = append(sb.buf, c)
 		sb.cleanup()
@@ -65,12 +60,12 @@ func (sb *StreamBuffer) insert(c *StreamChunk) bool {
 		return false
 	}
 
-	sb.buf = append(sb.buf[:pos], append([]*StreamChunk{c}, sb.buf[pos:]...)...)
+	sb.buf = append(sb.buf[:pos], append([]*Chunk{c}, sb.buf[pos:]...)...)
 	sb.cleanup()
 	return true
 }
 
-func (sb *StreamBuffer) cleanup() {
+func (sb *Buffer) cleanup() {
 	if len(sb.buf) <= SB_MAX_SIZE {
 		return
 	}
@@ -78,7 +73,7 @@ func (sb *StreamBuffer) cleanup() {
 	sb.buf = sb.buf[rm_pos:]
 }
 
-func (sb *StreamBuffer) next_id(cur_id uint64) (n_id uint64, pos int, err error) {
+func (sb *Buffer) next_id(cur_id uint64) (n_id uint64, pos int, err error) {
 	for i := 0; i < len(sb.buf); i += 1 {
 		if sb.buf[i].Id > cur_id {
 			return sb.buf[i].Id, i, nil
@@ -87,7 +82,7 @@ func (sb *StreamBuffer) next_id(cur_id uint64) (n_id uint64, pos int, err error)
 	return 0, 0, errors.New("next id not found")
 }
 
-func (sb *StreamBuffer) collectState() StreamBufferState {
+func (sb *Buffer) collectState() BufferState {
 	chunks := make([]uint64,0,10)
 	for i := 0; i < len(sb.buf); i += 1 {
 		if sb.buf[i].Id >= sb.lastId{
@@ -95,23 +90,23 @@ func (sb *StreamBuffer) collectState() StreamBufferState {
 		}
 	}
 
-	return StreamBufferState{
+	return BufferState{
 		LastId: sb.lastId,
 		Chunks: chunks,
 	}
 }
 
-func (sb *StreamBuffer) State() StreamBufferState {
+func (sb *Buffer) State() BufferState {
 	resp_ch := make(chan interface{})
-	sb.cmd_ch <- streamBufferCmd{
+	sb.cmd_ch <- command{
 		cmdId: sb_cmd_state,
 		resp:  resp_ch,
 	}
 	r_i := <-resp_ch
-	return r_i.(StreamBufferState)
+	return r_i.(BufferState)
 }
 
-func (sb *StreamBuffer) sendAny() bool {
+func (sb *Buffer) sendAny() bool {
 	sent := false
 	for {
 
@@ -132,7 +127,7 @@ func (sb *StreamBuffer) sendAny() bool {
 	return sent
 }
 
-func (sb *StreamBuffer) Serve() {
+func (sb *Buffer) Serve() {
 	deadline_ch := time.After(SB_NEXT_CHUNK_DEADLINE)
 	for {
 		select {

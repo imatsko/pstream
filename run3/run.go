@@ -9,10 +9,10 @@ import (
 )
 
 func main() {
-	in := make(chan *pstream.StreamChunk)
-	out := make(chan *pstream.StreamChunk, 32)
+	in := make(chan *pstream.Chunk)
+	out := make(chan *pstream.Chunk, 32)
 
-	sb := pstream.NewStreamBuffer(in, out)
+	sb := pstream.NewBuffer(in, out)
 
 	wg := sync.WaitGroup{}
 
@@ -22,7 +22,7 @@ func main() {
 			if rand.Intn(4) != 0 {
 				n := time.Now()
 				time.Sleep(pstream.SB_NEXT_CHUNK_PERIOD)
-				c := pstream.StreamChunk{uint64(i), i}
+				c := pstream.Chunk{uint64(i), i}
 				fmt.Printf("%v Sending %#v \n", n, c)
 				in <- &c
 				n = time.Now()
@@ -30,7 +30,7 @@ func main() {
 			} else if rand.Intn(3) != 0 {
 				n := time.Now()
 				time.Sleep(2*pstream.SB_NEXT_CHUNK_PERIOD)
-				c := pstream.StreamChunk{uint64(i), i}
+				c := pstream.Chunk{uint64(i), i}
 				fmt.Printf("%v Sending slow %#v \n", n, c)
 				in <- &c
 				n = time.Now()
