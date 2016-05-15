@@ -99,10 +99,13 @@ func (c *Connection) AskUpdate(){
 }
 
 func (c *Connection) Send(chunk *Chunk){
+	resp_chan := make(chan interface{})
 	c.cmd_ch <- command{
 		cmdId: conn_cmd_send_data,
 		args: chunk,
+		resp: resp_chan,
 	}
+	<-resp_chan
 }
 
 func (c *Connection) Serve() {
@@ -231,6 +234,9 @@ func (c *Connection) handleCmdSendData(cmd command) {
 	}
 
 	c.out_msg <- answer_msg
+
+	<-c.Peer.SendRate()
+	close(cmd.resp)
 }
 
 func (c *Connection) handleCmdSendUpdate(cmd command) {
