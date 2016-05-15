@@ -19,8 +19,8 @@ const (
 	SB_NEXT_CHUNK_PERIOD   = 100 * time.Millisecond // 10 chunks per second
 	SB_NEXT_CHUNK_DEADLINE = 5 * SB_NEXT_CHUNK_PERIOD
 	sb_cmd_state           = 1
+	sb_cmd_latest_useful   = 2
 )
-
 
 type BufferState struct {
 	LastId uint64
@@ -41,6 +41,9 @@ func NewBuffer(in <-chan *Chunk, out chan<- *Chunk) *Buffer {
 	sb.cmd_ch = make(chan command)
 	sb.BufOut = out
 	sb.BufIn = in
+
+	go sb.Serve()
+
 	return sb
 }
 
@@ -83,9 +86,9 @@ func (sb *Buffer) next_id(cur_id uint64) (n_id uint64, pos int, err error) {
 }
 
 func (sb *Buffer) collectState() BufferState {
-	chunks := make([]uint64,0,10)
+	chunks := make([]uint64, 0, 10)
 	for i := 0; i < len(sb.buf); i += 1 {
-		if sb.buf[i].Id >= sb.lastId{
+		if sb.buf[i].Id >= sb.lastId {
 			chunks = append(chunks, sb.buf[i].Id)
 		}
 	}
@@ -104,6 +107,39 @@ func (sb *Buffer) State() BufferState {
 	}
 	r_i := <-resp_ch
 	return r_i.(BufferState)
+}
+
+func (sb *Buffer) LatestUseful(chunks []uint64) *Chunk {
+	resp_ch := make(chan interface{})
+	sb.cmd_ch <- command{
+		cmdId: sb_cmd_latest_useful,
+		args: chunks,
+		resp:  resp_ch,
+	}
+	r_i := <-resp_ch
+	return r_i.(*Chunk)
+}
+
+func (sb *Buffer) getLatestUseful(chunks []uint64) *Chunk {
+
+	var latest *Chunk
+
+	for i_c, i_b := len(chunks)-1, len(sb.buf)-1; i_c >= 0 && i_b >= 0; {
+		if chunks[i_c] < sb.buf[i_b].Id {
+			latest = sb.buf[i_b]
+			break
+		}
+		if chunks[i_c] > sb.buf[i_b].Id {
+			i_c = i_c - 1
+			continue
+		}
+		if chunks[i_c] == sb.buf[i_b].Id {
+			i_c = i_c - 1
+			i_b = i_b - 1
+		}
+	}
+
+	return latest
 }
 
 func (sb *Buffer) sendAny() bool {
@@ -136,6 +172,9 @@ func (sb *Buffer) Serve() {
 			case sb_cmd_state:
 				buf_log.Debugf("Got collect state %#v", cmd)
 				cmd.resp <- sb.collectState()
+			case sb_cmd_latest_useful:
+				buf_log.Debugf("Got latest useful %#v", cmd)
+				cmd.resp <- sb.getLatestUseful(cmd.args.([]uint64))
 			default:
 				buf_log.Debugf("Got undefined command %#v", cmd)
 			}

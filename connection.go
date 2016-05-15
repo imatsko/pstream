@@ -18,6 +18,7 @@ const (
 	PROTO_DATA = 4
 	PROTO_ASK_UPDATE = 5
 
+	CONN_UNDEFINED = 0
 	CONN_RECV = 1
 	CONN_SEND = 2
 
@@ -39,6 +40,7 @@ type ProtocolMessage struct {
 
 type InitMessage struct {
 	SelfId string
+	ConnType int
 }
 
 type DataMessage struct {
@@ -61,8 +63,9 @@ type Connection struct {
 	ConnType       int
 	ConnId         string
 	PeerId         string
-	PeerBuffer     BufferState
-	PeerNeighbours PeerNeighboursState
+	// TODO protect buff and neighb state
+	PeerBuffer     *BufferState
+	PeerNeighbours *PeerNeighboursState
 	stream         net.Conn
 	log            *logging.Logger
 	cmd_ch         chan command
@@ -112,7 +115,9 @@ func (c *Connection) Serve() {
 	go c.serveRecv()
 	go c.serveSend()
 
-	go c.sendInit()
+	if c.ConnType != CONN_UNDEFINED {
+		go c.sendInit()
+	}
 
 	go c.SendUpdate()
 	go c.sendAskUpdate()
@@ -206,8 +211,14 @@ func (c *Connection) sendAskUpdate() {
 
 
 func (c *Connection) handleCmdInit(cmd command) {
+	if c.ConnType == CONN_UNDEFINED {
+		conn_log.Errorf("Unexpected send init type")
+		return
+	}
+
 	init := InitMessage{
 		SelfId: c.Peer.SelfId(),
+		ConnType: c.ConnType,
 	}
 	msg := ProtocolMessage{
 		MsgType: PROTO_INIT,
@@ -235,7 +246,6 @@ func (c *Connection) handleCmdSendData(cmd command) {
 
 	c.out_msg <- answer_msg
 
-	<-c.Peer.SendRate()
 	close(cmd.resp)
 }
 
@@ -268,6 +278,23 @@ func (c *Connection) handleCmdUnexpected(cmd command) {
 func (c *Connection) handleMsgInit(msg ProtocolMessage) {
 	init := msg.Payload.(InitMessage)
 	c.PeerId = init.SelfId
+
+	if c.ConnType != CONN_UNDEFINED {
+		c.Peer.ConnectionOpened(c)
+		return
+	}
+
+	switch init.ConnType {
+	case CONN_RECV:
+		c.ConnType = CONN_SEND
+		c.Peer.ConnectionOpened(c)
+	case CONN_SEND:
+		c.ConnType = CONN_RECV
+		c.Peer.ConnectionOpened(c)
+	default:
+		conn_log.Errorf("Unexpected connection type %v", init)
+		c.Close()
+	}
 }
 
 func (c *Connection) handleMsgData(msg ProtocolMessage) {
@@ -296,8 +323,8 @@ func (c *Connection) handleMsgUpdate(msg ProtocolMessage) {
 	}
 
 	state := msg.Payload.(UpdateMessage)
-	c.PeerBuffer = state.Buffer
-	c.PeerNeighbours = state.Neighbours
+	c.PeerBuffer = &state.Buffer
+	c.PeerNeighbours = &state.Neighbours
 }
 
 func (c *Connection) handleMsgClose(msg ProtocolMessage) {
