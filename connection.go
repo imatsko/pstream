@@ -2,37 +2,35 @@ package pstream
 
 import (
 	"encoding/gob"
-	"net"
 	"github.com/op/go-logging"
+	"net"
 	"time"
 )
-
 
 var conn_log = logging.MustGetLogger("connection")
 
 const (
-	PROTO_INIT = 0
-	PROTO_UPDATE = 1
-	PROTO_CLOSE = 2
-	PROTO_ERR = 3
-	PROTO_DATA = 4
-	PROTO_ASK_UPDATE = 5
+	PROTO_INIT         = 0
+	PROTO_UPDATE       = 1
+	PROTO_CLOSE        = 2
+	PROTO_ERR          = 3
+	PROTO_DATA         = 4
+	PROTO_ASK_UPDATE   = 5
 	PROTO_UPDATE_CHUNK = 6
 
 	CONN_UNDEFINED = 0
-	CONN_RECV = 1
-	CONN_SEND = 2
+	CONN_RECV      = 1
+	CONN_SEND      = 2
 
-	conn_cmd_init = 1
-	conn_cmd_close = 2
-	conn_cmd_send_update = 3
-	conn_cmd_send_data = 4
-	conn_cmd_send_ask_update = 5
+	conn_cmd_init              = 1
+	conn_cmd_close             = 2
+	conn_cmd_send_update       = 3
+	conn_cmd_send_data         = 4
+	conn_cmd_send_ask_update   = 5
 	conn_cmd_send_update_chunk = 6
 
-
-	CONN_UPDATE_PERIOD = 5*time.Second
-	CONN_ASK_UPDATE_PERIOD = 10*time.Second
+	CONN_UPDATE_PERIOD     = 5 * time.Second
+	CONN_ASK_UPDATE_PERIOD = 10 * time.Second
 )
 
 type ProtocolMessage struct {
@@ -41,7 +39,8 @@ type ProtocolMessage struct {
 }
 
 type InitMessage struct {
-	SelfId string
+	SelfId   string
+	Addr     string
 	ConnType int
 }
 
@@ -74,10 +73,11 @@ type command struct {
 }
 
 type Connection struct {
-	Peer           Peer
-	ConnType       int
-	ConnId         string
-	PeerId         string
+	Peer     Peer
+	ConnType int
+	PeerAddr string
+	ConnId   string
+	PeerId   string
 	// TODO protect buff and neighb state
 	PeerBuffer     *BufferState
 	PeerNeighbours *PeerNeighboursState
@@ -104,29 +104,28 @@ func NewConnection(id string, conn net.Conn, t int, peer Peer) *Connection {
 }
 
 func (c *Connection) Close() error {
-	c.cmd_ch <- command{cmdId:conn_cmd_close}
+	c.cmd_ch <- command{cmdId: conn_cmd_close}
 	return nil
 }
 
-func (c *Connection) SendUpdate(){
-	c.cmd_ch <- command{cmdId:conn_cmd_send_update}
+func (c *Connection) SendUpdate() {
+	c.cmd_ch <- command{cmdId: conn_cmd_send_update}
 }
 
-func (c *Connection) SendUpdateChunk(chunk_id uint64){
-	c.cmd_ch <- command{cmdId:conn_cmd_send_update_chunk, args: chunk_id}
+func (c *Connection) SendUpdateChunk(chunk_id uint64) {
+	c.cmd_ch <- command{cmdId: conn_cmd_send_update_chunk, args: chunk_id}
 }
 
-
-func (c *Connection) AskUpdate(){
-	c.cmd_ch <- command{cmdId:conn_cmd_send_ask_update}
+func (c *Connection) AskUpdate() {
+	c.cmd_ch <- command{cmdId: conn_cmd_send_ask_update}
 }
 
-func (c *Connection) Send(chunk *Chunk){
+func (c *Connection) Send(chunk *Chunk) {
 	resp_chan := make(chan interface{})
 	c.cmd_ch <- command{
 		cmdId: conn_cmd_send_data,
-		args: chunk,
-		resp: resp_chan,
+		args:  chunk,
+		resp:  resp_chan,
 	}
 	<-resp_chan
 }
@@ -205,10 +204,10 @@ func (c *Connection) sendUpdate() {
 	for {
 		select {
 		case <-c.close:
-		//close connection
+			//close connection
 			conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
 			return
-		case <- t.C:
+		case <-t.C:
 			c.SendUpdate()
 		}
 	}
@@ -224,15 +223,14 @@ func (c *Connection) sendAskUpdate() {
 	for {
 		select {
 		case <-c.close:
-		//close connection
+			//close connection
 			conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
 			return
-		case <- t.C:
+		case <-t.C:
 			c.AskUpdate()
 		}
 	}
 }
-
 
 func (c *Connection) handleCmdInit(cmd command) {
 	if c.ConnType == CONN_UNDEFINED {
@@ -241,8 +239,9 @@ func (c *Connection) handleCmdInit(cmd command) {
 	}
 
 	init := InitMessage{
-		SelfId: c.Peer.SelfId(),
+		SelfId:   c.Peer.SelfId(),
 		ConnType: c.ConnType,
+		Addr:     c.Peer.Addr(),
 	}
 	msg := ProtocolMessage{
 		MsgType: PROTO_INIT,
@@ -276,7 +275,7 @@ func (c *Connection) handleCmdSendData(cmd command) {
 
 func (c *Connection) handleCmdSendUpdate(cmd command) {
 	upd_msg := UpdateMessage{
-		Buffer: c.Peer.Buffer(),
+		Buffer:     c.Peer.Buffer(),
 		Neighbours: PeerNeighboursState{},
 	}
 
@@ -293,7 +292,7 @@ func (c *Connection) handleCmdSendUpdateChunk(cmd command) {
 
 	conn_log.Infof("Send update chunk %v", chunk_id)
 
-	upd_msg := UpdateChunkMessage{NewChunk:chunk_id}
+	upd_msg := UpdateChunkMessage{NewChunk: chunk_id}
 	answer_msg := ProtocolMessage{
 		MsgType: PROTO_UPDATE_CHUNK,
 		Payload: upd_msg,
@@ -316,6 +315,7 @@ func (c *Connection) handleCmdUnexpected(cmd command) {
 func (c *Connection) handleMsgInit(msg ProtocolMessage) {
 	init := msg.Payload.(InitMessage)
 	c.PeerId = init.SelfId
+	c.PeerAddr = init.Addr
 
 	if c.ConnType != CONN_UNDEFINED {
 		c.Peer.ConnectionOpened(c)
@@ -372,7 +372,6 @@ func (c *Connection) handleMsgUpdateChunk(msg ProtocolMessage) {
 		return
 	}
 
-
 	chunk := msg.Payload.(UpdateChunkMessage)
 	conn_log.Infof("Got update chunk %v", chunk)
 	if c.PeerBuffer != nil {
@@ -394,7 +393,7 @@ func (c *Connection) serveRecv() {
 	for {
 		select {
 		case <-c.close:
-		//close connection
+			//close connection
 			conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
 			c.stream.Close()
 			return
@@ -406,7 +405,7 @@ func (c *Connection) serveRecv() {
 			if err.Error() == "EOF" {
 				conn_log.Errorf("connection %d: input decode err %#v", c.ConnId, err)
 				conn_log.Warningf("connection %d: Close connection by EOF", c.ConnId)
-				c.in_msg <- ProtocolMessage{MsgType:PROTO_CLOSE}
+				c.in_msg <- ProtocolMessage{MsgType: PROTO_CLOSE}
 				return
 			}
 			conn_log.Errorf("connection %d: input decode err %#v", c.ConnId, err)
@@ -435,7 +434,3 @@ func (c *Connection) serveSend() {
 		}
 	}
 }
-
-
-
-
