@@ -121,6 +121,9 @@ func (sb *Buffer) LatestUseful(chunks []uint64) *Chunk {
 }
 
 func (sb *Buffer) getLatestUseful(chunks []uint64) *Chunk {
+	if len(chunks) == 0 && len(sb.buf) != 0 {
+		return sb.buf[len(sb.buf)-1]
+	}
 
 	var latest *Chunk
 

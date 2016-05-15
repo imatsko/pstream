@@ -17,6 +17,7 @@ const (
 	PROTO_ERR = 3
 	PROTO_DATA = 4
 	PROTO_ASK_UPDATE = 5
+	PROTO_UPDATE_CHUNK = 6
 
 	CONN_UNDEFINED = 0
 	CONN_RECV = 1
@@ -27,6 +28,7 @@ const (
 	conn_cmd_send_update = 3
 	conn_cmd_send_data = 4
 	conn_cmd_send_ask_update = 5
+	conn_cmd_send_update_chunk = 6
 
 
 	CONN_UPDATE_PERIOD = 5*time.Second
@@ -50,6 +52,19 @@ type DataMessage struct {
 type UpdateMessage struct {
 	Buffer     BufferState
 	Neighbours PeerNeighboursState
+}
+
+type UpdateChunkMessage struct {
+	NewChunk uint64
+}
+
+func init() {
+	gob.Register(ProtocolMessage{})
+	gob.Register(InitMessage{})
+	gob.Register(DataMessage{})
+	gob.Register(Chunk{})
+	gob.Register(UpdateMessage{})
+	gob.Register(UpdateChunkMessage{})
 }
 
 type command struct {
@@ -97,6 +112,11 @@ func (c *Connection) SendUpdate(){
 	c.cmd_ch <- command{cmdId:conn_cmd_send_update}
 }
 
+func (c *Connection) SendUpdateChunk(chunk_id uint64){
+	c.cmd_ch <- command{cmdId:conn_cmd_send_update_chunk, args: chunk_id}
+}
+
+
 func (c *Connection) AskUpdate(){
 	c.cmd_ch <- command{cmdId:conn_cmd_send_ask_update}
 }
@@ -135,6 +155,8 @@ func (c *Connection) Serve() {
 				c.handleCmdClose(cmd)
 			case conn_cmd_send_update:
 				c.handleCmdSendUpdate(cmd)
+			case conn_cmd_send_update_chunk:
+				c.handleCmdSendUpdateChunk(cmd)
 			case conn_cmd_send_ask_update:
 				c.handleCmdSendAskUpdate(cmd)
 			case conn_cmd_send_data:
@@ -153,6 +175,8 @@ func (c *Connection) Serve() {
 				c.handleMsgAskUpdate(msg)
 			case PROTO_UPDATE:
 				c.handleMsgUpdate(msg)
+			case PROTO_UPDATE_CHUNK:
+				c.handleMsgUpdateChunk(msg)
 			case PROTO_CLOSE:
 				c.handleMsgClose(msg)
 			default:
@@ -224,6 +248,7 @@ func (c *Connection) handleCmdInit(cmd command) {
 		MsgType: PROTO_INIT,
 		Payload: init,
 	}
+	c.Peer.ConnectionOpened(c)
 	c.out_msg <- msg
 }
 
@@ -234,9 +259,9 @@ func (c *Connection) handleCmdClose(cmd command) {
 }
 
 func (c *Connection) handleCmdSendData(cmd command) {
-	chunk := cmd.args.(Chunk)
+	chunk := cmd.args.(*Chunk)
 	data_msg := DataMessage{
-		Chunk: chunk,
+		Chunk: *chunk,
 	}
 
 	answer_msg := ProtocolMessage{
@@ -260,6 +285,19 @@ func (c *Connection) handleCmdSendUpdate(cmd command) {
 		Payload: upd_msg,
 	}
 
+	c.out_msg <- answer_msg
+}
+
+func (c *Connection) handleCmdSendUpdateChunk(cmd command) {
+	chunk_id := cmd.args.(uint64)
+
+	conn_log.Infof("Send update chunk %v", chunk_id)
+
+	upd_msg := UpdateChunkMessage{NewChunk:chunk_id}
+	answer_msg := ProtocolMessage{
+		MsgType: PROTO_UPDATE_CHUNK,
+		Payload: upd_msg,
+	}
 	c.out_msg <- answer_msg
 }
 
@@ -323,8 +361,23 @@ func (c *Connection) handleMsgUpdate(msg ProtocolMessage) {
 	}
 
 	state := msg.Payload.(UpdateMessage)
+	conn_log.Infof("Got update %v", state)
 	c.PeerBuffer = &state.Buffer
 	c.PeerNeighbours = &state.Neighbours
+}
+
+func (c *Connection) handleMsgUpdateChunk(msg ProtocolMessage) {
+	if c.ConnType != CONN_SEND {
+		conn_log.Warningf("connection %d: Only senders can recv update", c.ConnId)
+		return
+	}
+
+
+	chunk := msg.Payload.(UpdateChunkMessage)
+	conn_log.Infof("Got update chunk %v", chunk)
+	if c.PeerBuffer != nil {
+		c.PeerBuffer.Chunks = append(c.PeerBuffer.Chunks, chunk.NewChunk)
+	}
 }
 
 func (c *Connection) handleMsgClose(msg ProtocolMessage) {

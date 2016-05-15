@@ -67,6 +67,7 @@ func NewPeer(selfId string) *PeerImpl {
 	p.conn_counter = 1
 
 	p.sink_conn = make(map[string]*Connection)
+	p.src_conn = make(map[string]*Connection)
 
 	return p
 }
@@ -84,9 +85,10 @@ func (p *PeerImpl) ReconfigureNetwork() {
 	}
 }
 
-func (p *PeerImpl) BootstrapNetwork() {
+func (p *PeerImpl) BootstrapNetwork(peers []string) {
 	p.cmd_ch <- command{
 		cmdId: cmd_peer_bootstrap_net,
+		args: peers,
 	}
 }
 
@@ -132,6 +134,8 @@ func (p *PeerImpl) Serve() {
 				p.handleCmdNotifyUpdate(cmd)
 			case cmd_peer_reconfigure_net:
 				p.handleCmdReconfigureNetwork(cmd)
+			case cmd_peer_bootstrap_net:
+				p.handleCmdBootstrapNetwork(cmd)
 			default:
 				p.handleCmdUnexpected(cmd)
 			}
@@ -174,11 +178,42 @@ func (p *PeerImpl)getConnNumber() int{
 	return new_num
 }
 
+func (p *PeerImpl)createSourceConnection(addr string) {
+	peer_log.Infof("Start source connection")
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		peer_log.Errorf("New source conneciton error %v", err)
+		return
+	}
+
+	new_num := p.getConnNumber()
+
+	new_conn := NewConnection(fmt.Sprintf("%d", new_num), conn, CONN_RECV, p)
+	go new_conn.Serve()
+
+}
+
+func (p *PeerImpl)createSinkConnection(addr string) {
+	peer_log.Infof("Start sink connection")
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		peer_log.Errorf("New sink conneciton error %v", err)
+		return
+	}
+	new_num := p.getConnNumber()
+	new_conn := NewConnection(fmt.Sprintf("%d", new_num), conn, CONN_SEND, p)
+	go new_conn.Serve()
+}
+
+
 
 func (p *PeerImpl) handleCmdNotifyUpdate(cmd command) {
-	chunk_id, ok := cmd.args.(uint64)
-	peer_log.Warningf("Got update %v %v", chunk_id, ok)
-	// TODO add notify
+	chunk_id := cmd.args.(uint64)
+	peer_log.Warningf("Got update %v", chunk_id)
+	peer_log.Debugf("src_conn %v", p.src_conn)
+	for _, conn := range p.src_conn {
+		conn.SendUpdateChunk(chunk_id)
+	}
 }
 
 func (p *PeerImpl) handleCmdReconfigureNetwork(cmd command) {
@@ -187,8 +222,11 @@ func (p *PeerImpl) handleCmdReconfigureNetwork(cmd command) {
 }
 
 func (p *PeerImpl) handleCmdBootstrapNetwork(cmd command) {
-	peer_log.Warningf("Do bootstrap %v", cmd)
-	// TODO add bootstrap
+	peer_log.Infof("Perform bootstrap %v", cmd)
+	peers := cmd.args.([]string)
+	for _, peer := range peers {
+		p.createSourceConnection(peer)
+	}
 }
 
 
@@ -235,22 +273,35 @@ func (p *PeerImpl) handleCmdUnexpected(cmd command) {
 }
 
 func (p *PeerImpl) handleSend() {
+	if len(p.sink_conn) == 0 {
+		peer_log.Warningf("No clients")
+		return
+	}
+
 	sinks := make([]*Connection, 0, len(p.sink_conn))
 
 	for _, c := range p.sink_conn {
 		sinks = append(sinks, c)
 	}
 
+	peer_log.Debugf("sinks %#v", sinks)
+	//peer_log.Debugf("buf %#v", p.buf)
+
 	var conn *Connection
 	var chunk *Chunk
-	for i := 0; i < 10 && chunk != nil; i++{
+	for i := 0; i < 10 && chunk == nil; i++{
 		conn = sinks[rand.Intn(len(sinks))]
+		peer_log.Debugf("check sink %#v", conn)
+
 		peer_b := conn.PeerBuffer
 		if peer_b == nil {
+			peer_log.Debugf("peer buf not ready %#v", conn)
 			// skip peer without state
 			continue
 		}
+
 		chunks := peer_b.Chunks
+		peer_log.Debugf("conn chunks %#v", chunks)
 		chunk = p.buf.LatestUseful(chunks)
 	}
 	if chunk == nil {
@@ -296,6 +347,7 @@ func (p *PeerImpl) ConnectionClosed(c *Connection) {
 }
 
 func (p *PeerImpl) ConnectionOpened(c *Connection) {
+	peer_log.Debugf("connection ready %v", c)
 	p.cmd_ch <- command{
 		cmdId: cmd_peer_open,
 		args: c,
