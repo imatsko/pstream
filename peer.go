@@ -12,13 +12,13 @@ import (
 )
 
 const (
-	cmd_peer_close           = 1
-	cmd_peer_open            = 2
-	cmd_peer_notify_update   = 3
-	cmd_peer_reconfigure_net = 4
-	cmd_peer_bootstrap_net   = 5
-	cmd_peer_net_stat        = 6
-	cmd_peer_exit            = 7
+	peer_cmd_close           = 1
+	peer_cmd_open            = 2
+	peer_cmd_notify_update   = 3
+	peer_cmd_reconfigure_net = 4
+	peer_cmd_bootstrap_net   = 5
+	peer_cmd_net_stat        = 6
+	peer_cmd_exit            = 7
 )
 
 var peer_log = logging.MustGetLogger("peer")
@@ -110,20 +110,20 @@ func (p *PeerImpl) generateRandomId() {
 
 func (p *PeerImpl) NotifyUpdate(chunk_id uint64) {
 	p.cmd_ch <- command{
-		cmdId: cmd_peer_notify_update,
+		cmdId: peer_cmd_notify_update,
 		args:  chunk_id,
 	}
 }
 
 func (p *PeerImpl) ReconfigureNetwork() {
 	p.cmd_ch <- command{
-		cmdId: cmd_peer_reconfigure_net,
+		cmdId: peer_cmd_reconfigure_net,
 	}
 }
 
 func (p *PeerImpl) BootstrapNetwork(peers []string) {
 	p.cmd_ch <- command{
-		cmdId: cmd_peer_bootstrap_net,
+		cmdId: peer_cmd_bootstrap_net,
 		args:  peers,
 	}
 }
@@ -175,19 +175,19 @@ func (p *PeerImpl) Serve() {
 			return
 		case cmd := <-p.cmd_ch:
 			switch cmd.cmdId {
-			case cmd_peer_close:
+			case peer_cmd_close:
 				p.handleCmdClose(cmd)
-			case cmd_peer_open:
+			case peer_cmd_open:
 				p.handleCmdOpen(cmd)
-			case cmd_peer_notify_update:
+			case peer_cmd_notify_update:
 				p.handleCmdNotifyUpdate(cmd)
-			case cmd_peer_reconfigure_net:
+			case peer_cmd_reconfigure_net:
 				p.handleCmdReconfigureNetwork(cmd)
-			case cmd_peer_bootstrap_net:
+			case peer_cmd_bootstrap_net:
 				p.handleCmdBootstrapNetwork(cmd)
-			case cmd_peer_net_stat:
+			case peer_cmd_net_stat:
 				p.handleCmdNetworkStatus(cmd)
-			case cmd_peer_exit:
+			case peer_cmd_exit:
 				p.handleCmdExit(cmd)
 			default:
 				p.handleCmdUnexpected(cmd)
@@ -444,7 +444,7 @@ func (p *PeerImpl) SelfId() string {
 func (p *PeerImpl) Neighbours() PeerNeighboursState {
 	resp_ch := make(chan interface{})
 	p.cmd_ch <- command{
-		cmdId: cmd_peer_net_stat,
+		cmdId: peer_cmd_net_stat,
 		resp:  resp_ch,
 	}
 	return (<-resp_ch).(PeerNeighboursState)
@@ -460,7 +460,7 @@ func (p *PeerImpl) InChunks() chan<- *Chunk {
 
 func (p *PeerImpl) ConnectionClosed(c *Connection) {
 	p.cmd_ch <- command{
-		cmdId: cmd_peer_close,
+		cmdId: peer_cmd_close,
 		args:  c,
 	}
 }
@@ -468,7 +468,7 @@ func (p *PeerImpl) ConnectionClosed(c *Connection) {
 func (p *PeerImpl) ConnectionOpened(c *Connection) {
 	peer_log.Debugf("connection ready %v", c)
 	p.cmd_ch <- command{
-		cmdId: cmd_peer_open,
+		cmdId: peer_cmd_open,
 		args:  c,
 	}
 }
@@ -482,6 +482,6 @@ func (p *PeerImpl) Port() int {
 
 func (p *PeerImpl) Exit() {
 	p.cmd_ch <- command{
-		cmdId: cmd_peer_exit,
+		cmdId: peer_cmd_exit,
 	}
 }
