@@ -4,9 +4,11 @@ import (
 	"github.com/imatsko/pstream"
 	"math/rand"
 	"time"
-	"fmt"
 	"sync"
+	"github.com/op/go-logging"
 )
+
+var main_log = logging.MustGetLogger("Main")
 
 func main() {
 	in := make(chan *pstream.Chunk)
@@ -20,24 +22,19 @@ func main() {
 		wg.Add(1)
 		for i := 1; i <= 100; i += 1 {
 			if rand.Intn(4) != 0 {
-				n := time.Now()
 				time.Sleep(pstream.SB_NEXT_CHUNK_PERIOD)
 				c := pstream.Chunk{uint64(i), i}
-				fmt.Printf("%v Sending %#v \n", n, c)
+				main_log.Debugf("Sending %#v", c)
 				in <- &c
-				n = time.Now()
-				fmt.Printf("%v Sending %#v finished\n", n, c)
+				main_log.Debugf("Sending %#v finished", c)
 			} else if rand.Intn(3) != 0 {
-				n := time.Now()
 				time.Sleep(2*pstream.SB_NEXT_CHUNK_PERIOD)
 				c := pstream.Chunk{uint64(i), i}
-				fmt.Printf("%v Sending slow %#v \n", n, c)
+				main_log.Debugf("Sending slow %#v", c)
 				in <- &c
-				n = time.Now()
-				fmt.Printf("%v Sending slow %#v finished\n", n, c)
+				main_log.Debugf("Sending slow %#v finished", c)
 			} else {
-				n := time.Now()
-				fmt.Printf("%v drop chunk %v \n", n, i)
+				main_log.Debugf("drop chunk %v", i)
 			}
 		}
 		wg.Done()
@@ -46,9 +43,8 @@ func main() {
 	recv := func() {
 		for {
 			c := <- out
-			n := time.Now()
-			fmt.Printf("%v Received %#v \n", n, c)
-			fmt.Printf("%v State %#v \n", n, sb.State())
+			main_log.Debugf("Received %#v", c)
+			main_log.Debugf("State %#v", sb.State())
 		}
 	}
 

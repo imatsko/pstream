@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-var log = logging.MustGetLogger("StreamBuffer")
+var buf_log = logging.MustGetLogger("StreamBuffer")
 
 type Chunk struct {
 	Id   uint64
@@ -112,17 +112,17 @@ func (sb *Buffer) sendAny() bool {
 
 		nextId, pos, err := sb.next_id(sb.lastId)
 		if err != nil {
-			log.Infof("Next chunk for %d not found (%v)", sb.lastId, err)
+			buf_log.Infof("Next chunk for %d not found (%v)", sb.lastId, err)
 			break
 		}
 		if nextId != sb.lastId+1 {
-			log.Infof("Next chunk for %d is %d and not following, wait", sb.lastId, nextId)
+			buf_log.Infof("Next chunk for %d is %d and not following, wait", sb.lastId, nextId)
 			break
 		}
 		sb.BufOut <- sb.buf[pos]
 		sb.lastId = nextId
 		sent = true
-		log.Debugf("Chunk %d sent", nextId)
+		buf_log.Debugf("Chunk %d sent", nextId)
 	}
 	return sent
 }
@@ -134,15 +134,15 @@ func (sb *Buffer) Serve() {
 		case cmd := <-sb.cmd_ch:
 			switch cmd.cmdId {
 			case sb_cmd_state:
-				log.Debugf("Got collect state %#v", cmd)
+				buf_log.Debugf("Got collect state %#v", cmd)
 				cmd.resp <- sb.collectState()
 			default:
-				log.Debugf("Got undefined command %#v", cmd)
+				buf_log.Debugf("Got undefined command %#v", cmd)
 			}
 		case c := <-sb.BufIn:
-			log.Debugf("Got chunk %d", c.Id)
+			buf_log.Debugf("Got chunk %d", c.Id)
 			if c.Id <= sb.lastId {
-				log.Infof("Chunk %d already played, skip", c.Id)
+				buf_log.Infof("Chunk %d already played, skip", c.Id)
 				continue
 			}
 			sb.insert(c)
@@ -153,12 +153,12 @@ func (sb *Buffer) Serve() {
 			deadline_ch = time.After(SB_NEXT_CHUNK_DEADLINE)
 			nextId, pos, err := sb.next_id(sb.lastId)
 			if err != nil {
-				log.Infof("Next chunk for %d not found (%v) on deadline", sb.lastId, err)
+				buf_log.Infof("Next chunk for %d not found (%v) on deadline", sb.lastId, err)
 				continue
 			}
 			sb.BufOut <- sb.buf[pos]
 			sb.lastId = nextId
-			log.Debugf("Chunk %d sent by deadline", nextId)
+			buf_log.Debugf("Chunk %d sent by deadline", nextId)
 			// trigger send rest ready chunks
 			if sb.sendAny() {
 				deadline_ch = time.After(SB_NEXT_CHUNK_DEADLINE)
