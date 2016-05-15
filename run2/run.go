@@ -96,8 +96,13 @@ func start_source() {
 
 	recv := func() {
 		for {
-			c := <-out
-			main_log.Debugf("Received %#v", c)
+			select {
+			case c := <-out:
+				main_log.Debugf("Received %#v", c)
+			case <-time.After(time.Second * 30):
+				main_log.Debugf("No new packages too long")
+				p1.Exit()
+			}
 		}
 	}
 
@@ -115,8 +120,13 @@ func start_peer() {
 
 	recv := func() {
 		for {
-			c := <-out
-			main_log.Debugf("Received %#v", c)
+			select {
+			case c := <-out:
+				main_log.Debugf("Received %#v", c)
+			case <-time.After(time.Second * 30):
+				main_log.Debugf("No new packages too long")
+				p1.Exit()
+			}
 		}
 	}
 

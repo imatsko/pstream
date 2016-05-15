@@ -18,24 +18,27 @@ const (
 	cmd_peer_reconfigure_net = 4
 	cmd_peer_bootstrap_net   = 5
 	cmd_peer_net_stat        = 6
+	cmd_peer_exit            = 7
 )
 
 var peer_log = logging.MustGetLogger("peer")
 
-type Sink struct {
-	Addr        string
+type PeerStat struct {
+	Host        string
+	Port        int
 	SourceCount int
 	SinkCount   int
 }
 
 type PeerNeighboursState struct {
-	SourceCount int
-	Sinks       []Sink
+	Sinks   []PeerStat
+	Sources []PeerStat
 }
 
 type Peer interface {
 	SelfId() string
-	Addr() string
+	Host() string
+	Port() int
 	Neighbours() PeerNeighboursState
 	Buffer() BufferState
 	InChunks() chan<- *Chunk
@@ -44,41 +47,49 @@ type Peer interface {
 }
 
 type PeerImpl struct {
-	addr       string
 	selfId     string
-	buf        *Buffer
-	In         chan *Chunk
-	buf_in     chan *Chunk
-	Out        chan *Chunk
+	listenAddr string
+
+	buf_input chan *Chunk
+	buf       *Buffer
+
+	In  chan *Chunk
+	Out chan *Chunk
+
+	sendPeriod time.Duration
 	rate_ch    chan bool
-	SendPeriod time.Duration
+
+	port int
+	host string
+
+	quit   chan bool
+	cmd_ch chan command
 
 	conn_counter     int
 	conn_counter_mut sync.Mutex
-
-	cmd_ch chan command
 
 	sink_conn map[string]*Connection
 	src_conn  map[string]*Connection
 }
 
-func NewPeer(selfId string, addr string, sendPeriod time.Duration) *PeerImpl {
+func NewPeer(selfId string, listen string, sendPeriod time.Duration) *PeerImpl {
 	p := new(PeerImpl)
 	if selfId == "" {
 		p.generateRandomId()
 	} else {
 		p.selfId = selfId
 	}
-	p.addr = addr
-	p.SendPeriod = sendPeriod
+	p.listenAddr = listen
+	p.sendPeriod = sendPeriod
 
 	p.In = make(chan *Chunk)
-	p.buf_in = make(chan *Chunk)
 	p.Out = make(chan *Chunk, 32)
 
-	p.buf = NewBuffer(p.buf_in, p.Out)
+	p.buf_input = make(chan *Chunk)
+	p.buf = NewBuffer(p.buf_input, p.Out)
 
 	p.cmd_ch = make(chan command, 32)
+	p.quit = make(chan bool)
 
 	p.conn_counter = 1
 
@@ -124,6 +135,8 @@ func (p *PeerImpl) ServeSendRate(period time.Duration) {
 
 	for {
 		select {
+		case <-p.quit:
+			return
 		case <-ticker:
 			p.rate_ch <- true
 		default:
@@ -135,24 +148,31 @@ func (p *PeerImpl) ServeInfiniteSendRate() {
 	peer_log.Infof("start unlimited rate")
 	p.rate_ch = make(chan bool)
 	for {
-		p.rate_ch <- true
+		select {
+		case <-p.quit:
+			return
+		default:
+			p.rate_ch <- true
+		}
 	}
 }
 
 func (p *PeerImpl) Serve() {
 
-	if p.SendPeriod == 0 {
+	if p.sendPeriod == 0 {
 		go p.ServeInfiniteSendRate()
 	} else {
-		go p.ServeSendRate(p.SendPeriod)
+		go p.ServeSendRate(p.sendPeriod)
 	}
 
-	if p.addr != "" {
-		go p.ServeConnections(p.addr)
+	if p.listenAddr != "" {
+		go p.ServeConnections()
 	}
 
 	for {
 		select {
+		case <-p.quit:
+			return
 		case cmd := <-p.cmd_ch:
 			switch cmd.cmdId {
 			case cmd_peer_close:
@@ -167,27 +187,37 @@ func (p *PeerImpl) Serve() {
 				p.handleCmdBootstrapNetwork(cmd)
 			case cmd_peer_net_stat:
 				p.handleCmdNetworkStatus(cmd)
+			case cmd_peer_exit:
+				p.handleCmdExit(cmd)
 			default:
 				p.handleCmdUnexpected(cmd)
 			}
 		case chunk := <-p.In:
 			p.NotifyUpdate(chunk.Id)
-			p.buf_in <- chunk
+			p.buf_input <- chunk
 		case <-p.rate_ch:
 			p.handleSend()
 		}
 	}
 }
 
-func (p *PeerImpl) ServeConnections(addr string) {
+func (p *PeerImpl) ServeConnections() {
 	peer_log.Infof("Start peer")
-	listen, err := net.Listen("tcp", addr)
+	listen, err := net.Listen("tcp", p.listenAddr)
 	if err != nil {
 		panic(err)
 	}
-	p.addr = addr
+
+	p.port = listen.Addr().(*net.TCPAddr).Port
+	p.host = listen.Addr().(*net.TCPAddr).IP.String()
 
 	for {
+		select {
+		case <-p.quit:
+			return
+		default:
+		}
+
 		conn, err := listen.Accept() // this blocks until connection or error
 		if err != nil {
 			peer_log.Errorf("New conneciton error %v", err)
@@ -260,28 +290,61 @@ func (p *PeerImpl) handleCmdBootstrapNetwork(cmd command) {
 
 func (p *PeerImpl) handleCmdNetworkStatus(cmd command) {
 	peer_log.Infof("get network status %v", cmd)
-	sinks := make([]Sink, 0)
+	sinks := make([]PeerStat, 0)
 
 	for _, conn := range p.sink_conn {
-		addr := conn.PeerAddr
+		host := conn.PeerHost
+		port := conn.PeerPort
 		source_count := 0
 		sink_count := 0
 		if conn.PeerNeighbours != nil {
-			source_count = conn.PeerNeighbours.SourceCount
+			source_count = len(conn.PeerNeighbours.Sources)
 			sink_count = len(conn.PeerNeighbours.Sinks)
 		}
 		sinks = append(sinks,
-			Sink{
-				Addr:        addr,
+			PeerStat{
+				Host:        host,
+				Port:        port,
+				SourceCount: source_count,
+				SinkCount:   sink_count,
+			})
+	}
+
+	sources := make([]PeerStat, 0)
+	for _, conn := range p.src_conn {
+		host := conn.PeerHost
+		port := conn.PeerPort
+		source_count := 0
+		sink_count := 0
+		if conn.PeerNeighbours != nil {
+			source_count = len(conn.PeerNeighbours.Sources)
+			sink_count = len(conn.PeerNeighbours.Sinks)
+		}
+		sources = append(sinks,
+			PeerStat{
+				Host:        host,
+				Port:        port,
 				SourceCount: source_count,
 				SinkCount:   sink_count,
 			})
 	}
 
 	cmd.resp <- PeerNeighboursState{
-		SourceCount: len(p.src_conn),
-		Sinks:       sinks,
+		Sources: sources,
+		Sinks:   sinks,
 	}
+}
+
+func (p *PeerImpl) handleCmdExit(cmd command) {
+	peer_log.Warningf("Do exit %v", cmd)
+
+	for _, c := range p.sink_conn {
+		c.Close()
+	}
+	for _, c := range p.src_conn {
+		c.Close()
+	}
+	close(p.quit)
 }
 
 func (p *PeerImpl) handleCmdClose(cmd command) {
@@ -410,6 +473,15 @@ func (p *PeerImpl) ConnectionOpened(c *Connection) {
 	}
 }
 
-func (p *PeerImpl) Addr() string {
-	return p.addr
+func (p *PeerImpl) Host() string {
+	return p.host
+}
+func (p *PeerImpl) Port() int {
+	return p.port
+}
+
+func (p *PeerImpl) Exit() {
+	p.cmd_ch <- command{
+		cmdId: cmd_peer_exit,
+	}
 }

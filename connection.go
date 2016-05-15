@@ -10,10 +10,9 @@ import (
 var conn_log = logging.MustGetLogger("connection")
 
 const (
-	PROTO_INIT         = 0
-	PROTO_UPDATE       = 1
-	PROTO_CLOSE        = 2
-	PROTO_ERR          = 3
+	PROTO_INIT         = 1
+	PROTO_UPDATE       = 2
+	PROTO_CLOSE        = 3
 	PROTO_DATA         = 4
 	PROTO_ASK_UPDATE   = 5
 	PROTO_UPDATE_CHUNK = 6
@@ -40,7 +39,8 @@ type ProtocolMessage struct {
 
 type InitMessage struct {
 	SelfId   string
-	Addr     string
+	Host     string
+	Port     int
 	ConnType int
 }
 
@@ -74,10 +74,13 @@ type command struct {
 
 type Connection struct {
 	Peer     Peer
-	ConnType int
-	PeerAddr string
 	ConnId   string
+	ConnType int
+
+	PeerHost string
+	PeerPort int
 	PeerId   string
+
 	// TODO protect buff and neighb state
 	PeerBuffer     *BufferState
 	PeerNeighbours *PeerNeighboursState
@@ -135,11 +138,11 @@ func (c *Connection) Serve() {
 	go c.serveSend()
 
 	if c.ConnType != CONN_UNDEFINED {
-		go c.sendInit()
+		go c.sheduleSendInit()
 	}
 
 	go c.SendUpdate()
-	go c.sendAskUpdate()
+	go c.scheduleSendAskUpdate()
 
 	for {
 		select {
@@ -187,14 +190,14 @@ func (c *Connection) Serve() {
 	}
 }
 
-func (c *Connection) sendInit() {
+func (c *Connection) sheduleSendInit() {
 	cmd := command{
 		cmdId: conn_cmd_init,
 	}
 	c.cmd_ch <- cmd
 }
 
-func (c *Connection) sendUpdate() {
+func (c *Connection) scheduleSendUpdate() {
 	if c.ConnType != CONN_RECV {
 		return
 	}
@@ -213,7 +216,7 @@ func (c *Connection) sendUpdate() {
 	}
 }
 
-func (c *Connection) sendAskUpdate() {
+func (c *Connection) scheduleSendAskUpdate() {
 	if c.ConnType != CONN_SEND {
 		return
 	}
@@ -241,7 +244,8 @@ func (c *Connection) handleCmdInit(cmd command) {
 	init := InitMessage{
 		SelfId:   c.Peer.SelfId(),
 		ConnType: c.ConnType,
-		Addr:     c.Peer.Addr(),
+		Host:     c.Peer.Host(),
+		Port:     c.Peer.Port(),
 	}
 	msg := ProtocolMessage{
 		MsgType: PROTO_INIT,
@@ -315,7 +319,8 @@ func (c *Connection) handleCmdUnexpected(cmd command) {
 func (c *Connection) handleMsgInit(msg ProtocolMessage) {
 	init := msg.Payload.(InitMessage)
 	c.PeerId = init.SelfId
-	c.PeerAddr = init.Addr
+	c.PeerHost = c.stream.RemoteAddr().(*net.TCPAddr).IP.String()
+	c.PeerPort = init.Port
 
 	if c.ConnType != CONN_UNDEFINED {
 		c.Peer.ConnectionOpened(c)
@@ -355,11 +360,6 @@ func (c *Connection) handleMsgAskUpdate(msg ProtocolMessage) {
 }
 
 func (c *Connection) handleMsgUpdate(msg ProtocolMessage) {
-	if c.ConnType != CONN_SEND {
-		conn_log.Warningf("connection %d: Only senders can recv update", c.ConnId)
-		return
-	}
-
 	state := msg.Payload.(UpdateMessage)
 	conn_log.Infof("Got update %v", state)
 	c.PeerBuffer = &state.Buffer
