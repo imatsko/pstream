@@ -28,6 +28,10 @@ const (
 	conn_cmd_send_ask_update   = 5
 	conn_cmd_send_update_chunk = 6
 
+	conn_cmd_get_buffer = 7
+	conn_cmd_get_neighbours = 8
+
+
 	CONN_UPDATE_PERIOD     = 5 * time.Second
 	CONN_ASK_UPDATE_PERIOD = 10 * time.Second
 )
@@ -73,23 +77,23 @@ type command struct {
 }
 
 type Connection struct {
-	Peer     Peer
-	ConnId   string
-	ConnType int
+	Peer             Peer
+	ConnId           string
+	ConnType         int
 
-	PeerHost string
-	PeerPort int
-	PeerId   string
+	PeerHost         string
+	PeerPort         int
+	PeerId           string
 
 	// TODO protect buff and neighb state
-	PeerBuffer     *BufferState
-	PeerNeighbours *PeerNeighboursState
-	stream         net.Conn
-	log            *logging.Logger
-	cmd_ch         chan command
-	in_msg         chan ProtocolMessage
-	out_msg        chan ProtocolMessage
-	close          chan bool
+	buffer_state     *BufferState
+	neighbours_state *PeerNeighboursState
+	stream           net.Conn
+	log              *logging.Logger
+	cmd_ch           chan command
+	in_msg           chan ProtocolMessage
+	out_msg          chan ProtocolMessage
+	close            chan bool
 }
 
 func NewConnection(id string, conn net.Conn, t int, peer Peer) *Connection {
@@ -133,16 +137,38 @@ func (c *Connection) Send(chunk *Chunk) {
 	<-resp_chan
 }
 
+func (c *Connection) Buffer() *BufferState {
+	//resp_chan := make(chan interface{})
+	//c.cmd_ch <- command{
+	//	cmdId: conn_cmd_get_buffer,
+	//	resp:  resp_chan,
+	//}
+	//return (<-resp_chan).(*BufferState)
+
+	return c.buffer_state
+}
+
+func (c *Connection) Neighbours() *PeerNeighboursState {
+	//resp_chan := make(chan interface{})
+	//c.cmd_ch <- command{
+	//	cmdId: conn_cmd_get_neighbours,
+	//	resp:  resp_chan,
+	//}
+	//return (<-resp_chan).(*PeerNeighboursState)
+
+	return c.neighbours_state
+}
+
 func (c *Connection) Serve() {
 	go c.serveRecv()
 	go c.serveSend()
 
 	if c.ConnType != CONN_UNDEFINED {
-		go c.sheduleSendInit()
+		c.sheduleSendInit()
 	}
 
-	go c.SendUpdate()
-	go c.scheduleSendAskUpdate()
+	c.SendUpdate()
+	go c.scheduleSendUpdate()
 
 	for {
 		select {
@@ -163,6 +189,10 @@ func (c *Connection) Serve() {
 				c.handleCmdSendAskUpdate(cmd)
 			case conn_cmd_send_data:
 				c.handleCmdSendData(cmd)
+			case conn_cmd_get_buffer:
+				c.handleCmdGetBuffer(cmd)
+			case conn_cmd_get_neighbours:
+				c.handleCmdGetNeighbours(cmd)
 			default:
 				c.handleCmdUnexpected(cmd)
 			}
@@ -208,7 +238,7 @@ func (c *Connection) scheduleSendUpdate() {
 		select {
 		case <-c.close:
 			//close connection
-			conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
+			conn_log.Warningf("connection %v: Handle close connection", c.ConnId)
 			return
 		case <-t.C:
 			c.SendUpdate()
@@ -278,10 +308,13 @@ func (c *Connection) handleCmdSendData(cmd command) {
 }
 
 func (c *Connection) handleCmdSendUpdate(cmd command) {
+	conn_log.Infof("SEND update")
+
 	upd_msg := UpdateMessage{
 		Buffer:     c.Peer.Buffer(),
-		Neighbours: PeerNeighboursState{},
+		Neighbours: c.Peer.Neighbours(),
 	}
+	conn_log.Infof("SEND update %v", upd_msg)
 
 	answer_msg := ProtocolMessage{
 		MsgType: PROTO_UPDATE,
@@ -310,6 +343,15 @@ func (c *Connection) handleCmdSendAskUpdate(cmd command) {
 	}
 
 	c.out_msg <- msg
+}
+func (c *Connection) handleCmdGetBuffer(cmd command) {
+	cmd.resp <- c.buffer_state
+	return
+}
+
+func (c *Connection) handleCmdGetNeighbours(cmd command) {
+	cmd.resp <- c.neighbours_state
+	return
 }
 
 func (c *Connection) handleCmdUnexpected(cmd command) {
@@ -362,8 +404,8 @@ func (c *Connection) handleMsgAskUpdate(msg ProtocolMessage) {
 func (c *Connection) handleMsgUpdate(msg ProtocolMessage) {
 	state := msg.Payload.(UpdateMessage)
 	conn_log.Infof("Got update %v", state)
-	c.PeerBuffer = &state.Buffer
-	c.PeerNeighbours = &state.Neighbours
+	c.buffer_state = &state.Buffer
+	c.neighbours_state = &state.Neighbours
 }
 
 func (c *Connection) handleMsgUpdateChunk(msg ProtocolMessage) {
@@ -374,8 +416,8 @@ func (c *Connection) handleMsgUpdateChunk(msg ProtocolMessage) {
 
 	chunk := msg.Payload.(UpdateChunkMessage)
 	conn_log.Infof("Got update chunk %v", chunk)
-	if c.PeerBuffer != nil {
-		c.PeerBuffer.Chunks = append(c.PeerBuffer.Chunks, chunk.NewChunk)
+	if c.buffer_state != nil {
+		c.buffer_state.Chunks = append(c.buffer_state.Chunks, chunk.NewChunk)
 	}
 }
 

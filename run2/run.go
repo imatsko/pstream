@@ -76,6 +76,13 @@ func start_source() {
 	send := func() {
 		for i := uint64(1); i <= Config.SourceChunks; i += 1 {
 
+			time.Sleep(pstream.SB_NEXT_CHUNK_PERIOD)
+			c := pstream.Chunk{uint64(i), i}
+			main_log.Debugf("Sending %#v", c)
+			in <- &c
+			main_log.Debugf("Sending %#v finished", c)
+			continue
+
 			if rand.Intn(4) != 0 {
 				time.Sleep(pstream.SB_NEXT_CHUNK_PERIOD)
 				c := pstream.Chunk{uint64(i), i}
@@ -114,7 +121,12 @@ func start_source() {
 func start_peer() {
 	p1 := pstream.NewPeer("", Config.Listen, Config.SendPeriod)
 	go p1.Serve()
-	p1.BootstrapNetwork([]string(Config.BootstrapList))
+
+	go func() {
+		time.Sleep(time.Second)
+		p1.BootstrapNetwork([]string(Config.BootstrapList))
+	}()
+
 
 	out := p1.Out
 
