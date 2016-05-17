@@ -76,7 +76,7 @@ func start_source() {
 	send := func() {
 		for i := uint64(1); i <= Config.SourceChunks; i += 1 {
 
-			time.Sleep(pstream.SB_NEXT_CHUNK_PERIOD)
+			time.Sleep(pstream.STREAM_CHUNK_PERIOD)
 			c := pstream.Chunk{uint64(i), i}
 			main_log.Debugf("Sending %#v", c)
 			in <- &c
@@ -84,13 +84,13 @@ func start_source() {
 			continue
 
 			if rand.Intn(4) != 0 {
-				time.Sleep(pstream.SB_NEXT_CHUNK_PERIOD)
+				time.Sleep(pstream.STREAM_CHUNK_PERIOD)
 				c := pstream.Chunk{uint64(i), i}
 				main_log.Debugf("Sending %#v", c)
 				in <- &c
 				main_log.Debugf("Sending %#v finished", c)
 			} else if rand.Intn(3) != 0 {
-				time.Sleep(2 * pstream.SB_NEXT_CHUNK_PERIOD)
+				time.Sleep(2 * pstream.STREAM_CHUNK_PERIOD)
 				c := pstream.Chunk{uint64(i), i}
 				main_log.Debugf("Sending slow %#v", c)
 				in <- &c

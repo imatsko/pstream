@@ -129,7 +129,7 @@ func (c *Connection) AskUpdate() {
 }
 
 func (c *Connection) Send(chunk *Chunk) {
-	resp_chan := make(chan interface{})
+	resp_chan := make(chan interface{},2)
 	c.cmd_ch <- command{
 		cmdId: conn_cmd_send_data,
 		args:  chunk,
@@ -138,7 +138,7 @@ func (c *Connection) Send(chunk *Chunk) {
 
 	select {
 	case <-resp_chan:
-	case <-time.After(CONN_SEND_TIMEOUT):
+	//case <-time.After(CONN_SEND_TIMEOUT):
 	}
 }
 
@@ -317,10 +317,24 @@ func (c *Connection) handleCmdSendData(cmd command) {
 }
 
 func (c *Connection) updateChunks(id uint64) {
-	if c.buffer_state != nil {
-		// TODO insert in right place
-		c.buffer_state.Chunks = append(c.buffer_state.Chunks, id)
+	if c.buffer_state == nil {
+		return
 	}
+	if len(c.buffer_state.Chunks) == 0 {
+		c.buffer_state.Chunks = append(c.buffer_state.Chunks, id)
+		return
+	}
+
+	var pos int
+	for pos = len(c.buffer_state.Chunks) - 1; pos >= 0 && c.buffer_state.Chunks[pos] > id; pos -= 1 {
+	}
+	pos += 1
+	if pos != 0 && c.buffer_state.Chunks[pos-1] == id {
+		// repeated id
+		return
+	}
+
+	c.buffer_state.Chunks = append(c.buffer_state.Chunks[:pos], append([]uint64{id}, c.buffer_state.Chunks[pos:]...)...)
 }
 
 func (c *Connection) handleCmdSendUpdate(cmd command) {

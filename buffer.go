@@ -16,8 +16,7 @@ type Chunk struct {
 const (
 	SB_SIZE                = 10
 	SB_MAX_SIZE            = 50
-	SB_NEXT_CHUNK_PERIOD   = 100 * time.Millisecond // 10 chunks per second
-	SB_NEXT_CHUNK_DEADLINE = 5 * SB_NEXT_CHUNK_PERIOD
+	SB_NEXT_CHUNK_DEADLINE = 5 * STREAM_CHUNK_PERIOD
 	sb_cmd_state           = 1
 	sb_cmd_latest_useful   = 2
 	sb_cmd_latest          = 3

@@ -13,6 +13,10 @@ import (
 	"math"
 )
 
+
+const STREAM_CHUNK_PERIOD = time.Millisecond*100
+
+
 const (
 	PEER_FIXED_COUNT = 5
 	PEER_MIN_SOURCES = 2
