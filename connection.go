@@ -154,8 +154,8 @@ func (c *Connection) Buffer() *BufferState {
 	//}
 	//return (<-resp_chan).(*BufferState)
 
-	c.buf_mut.Lock()
-	defer c.buf_mut.Unlock()
+	//c.buf_mut.Lock()
+	//defer c.buf_mut.Unlock()
 	if c.buffer_state == nil {
 		return nil
 	}
@@ -339,8 +339,8 @@ func (c *Connection) handleCmdSendData(cmd command) {
 }
 
 func (c *Connection) updateChunks(id uint64) {
-	c.buf_mut.Lock()
-	defer c.buf_mut.Unlock()
+	//c.buf_mut.Lock()
+	//defer c.buf_mut.Unlock()
 
 	if c.buffer_state == nil {
 		return
@@ -459,12 +459,12 @@ func (c *Connection) handleMsgAskUpdate(msg ProtocolMessage) {
 func (c *Connection) handleMsgUpdate(msg ProtocolMessage) {
 	state := msg.Payload.(UpdateMessage)
 	//conn_log.Infof("Got update %v", state)
-	c.buf_mut.Lock()
+	//c.buf_mut.Lock()
 	c.buffer_state = &state.Buffer
-	c.buf_mut.Unlock()
-	c.neighbours_mut.Lock()
+	//c.buf_mut.Unlock()
+	//c.neighbours_mut.Lock()
 	c.neighbours_state = &state.Neighbours
-	c.neighbours_mut.Unlock()
+	//c.neighbours_mut.Unlock()
 }
 
 func (c *Connection) handleMsgUpdateChunk(msg ProtocolMessage) {
