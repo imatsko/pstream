@@ -309,7 +309,15 @@ func (c *Connection) handleCmdSendData(cmd command) {
 
 	c.out_msg <- answer_msg
 
+	c.updateChunks(chunk.Id)
+
 	close(cmd.resp)
+}
+
+func (c *Connection) updateChunks(id uint64) {
+	if c.buffer_state != nil {
+		c.buffer_state.Chunks = append(c.buffer_state.Chunks, id)
+	}
 }
 
 func (c *Connection) handleCmdSendUpdate(cmd command) {
@@ -421,9 +429,7 @@ func (c *Connection) handleMsgUpdateChunk(msg ProtocolMessage) {
 
 	chunk := msg.Payload.(UpdateChunkMessage)
 	//conn_log.Infof("Got update chunk %v", chunk)
-	if c.buffer_state != nil {
-		c.buffer_state.Chunks = append(c.buffer_state.Chunks, chunk.NewChunk)
-	}
+	c.updateChunks(chunk.NewChunk)
 }
 
 func (c *Connection) handleMsgClose(msg ProtocolMessage) {
