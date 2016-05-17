@@ -143,6 +143,7 @@ func (c *Connection) Send(chunk *Chunk) {
 }
 
 func (c *Connection) Buffer() *BufferState {
+	//TODO protect
 	//resp_chan := make(chan interface{})
 	//c.cmd_ch <- command{
 	//	cmdId: conn_cmd_get_buffer,
@@ -154,6 +155,7 @@ func (c *Connection) Buffer() *BufferState {
 }
 
 func (c *Connection) Neighbours() *PeerNeighboursState {
+	// TODO protect
 	//resp_chan := make(chan interface{})
 	//c.cmd_ch <- command{
 	//	cmdId: conn_cmd_get_neighbours,
@@ -316,6 +318,7 @@ func (c *Connection) handleCmdSendData(cmd command) {
 
 func (c *Connection) updateChunks(id uint64) {
 	if c.buffer_state != nil {
+		// TODO insert in right place
 		c.buffer_state.Chunks = append(c.buffer_state.Chunks, id)
 	}
 }
@@ -461,7 +464,7 @@ func (c *Connection) serveRecv() {
 				c.in_msg <- ProtocolMessage{MsgType: PROTO_CLOSE}
 				return
 			}
-			//conn_log.Errorf("connection %d: input decode err %//v", c.ConnId, err)
+			conn_log.Errorf("connection %d: input decode err %//v", c.ConnId, err)
 			continue
 		}
 		//conn_log.Debugf("connection %d: recv msg %//v", c.ConnId, recvMessage)
@@ -482,7 +485,7 @@ func (c *Connection) serveSend() {
 		//conn_log.Debugf("connection %d: send msg %//v", c.ConnId, sendMessage)
 		err := encoder.Encode(sendMessage)
 		if err != nil {
-			//conn_log.Errorf("connection %d: output encode err %v", c.ConnId, err)
+			conn_log.Errorf("connection %d: output encode err %v", c.ConnId, err)
 			continue
 		}
 	}

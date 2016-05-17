@@ -332,7 +332,7 @@ func (p *PeerImpl) handleCmdNotifyUpdate(cmd command) {
 func (p *PeerImpl) handleCmdReconfigureNetwork(cmd command) {
 	p.log.Printf("Do reconfigure %v", cmd)
 
-	p.reconfigureNetworkFixedN()
+	//p.reconfigureNetworkFixedN()
 }
 
 func (p *PeerImpl) handleCmdBootstrapNetwork(cmd command) {
@@ -755,6 +755,12 @@ func (a by_latest) Less(i, j int) bool {
 	return false
 }
 
+func select_random_proportionally(sinks by_latest) sink_rate {
+	sort.Sort(sinks)
+
+	// TODO select random proportionally
+	return sinks[len(sinks) - 1]
+}
 
 func (p *PeerImpl) handleSendDesired() {
 	if len(p.sink_conn) == 0 {
@@ -796,12 +802,10 @@ func (p *PeerImpl) handleSendDesired() {
 		return
 	}
 
-	sort.Sort(by_latest(sinks))
+	selected_rate := select_random_proportionally(by_latest(sinks))
 
-	most_useful := sinks[len(sinks)-1]
-
-	conn := p.sink_conn[most_useful.id]
-	chunk := most_useful.latest_useful
+	conn := p.sink_conn[selected_rate.id]
+	chunk := selected_rate.latest_useful
 
 	p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn.ConnId)
 	conn.Send(chunk)

@@ -199,10 +199,10 @@ func (sb *Buffer) Serve() {
 				buf_log.Debugf("BUF: Got collect state %#v", cmd)
 				cmd.resp <- sb.collectState()
 			case sb_cmd_latest_useful:
-				buf_log.Debugf("BUF: Got latest useful")
+				//buf_log.Debugf("BUF: Got latest useful")
 				cmd.resp <- sb.getLatestUseful(cmd.args.([]uint64))
 			case sb_cmd_latest:
-				buf_log.Debugf("BUF: Got latest")
+				//buf_log.Debugf("BUF: Got latest")
 				cmd.resp <- sb.getLatest()
 			default:
 				buf_log.Debugf("BUF: Got undefined command %#v", cmd)
