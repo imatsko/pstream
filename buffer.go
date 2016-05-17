@@ -20,6 +20,7 @@ const (
 	SB_NEXT_CHUNK_DEADLINE = 5 * SB_NEXT_CHUNK_PERIOD
 	sb_cmd_state           = 1
 	sb_cmd_latest_useful   = 2
+	sb_cmd_latest          = 3
 )
 
 type BufferState struct {
@@ -124,6 +125,23 @@ func (sb *Buffer) LatestUseful(chunks []uint64) *Chunk {
 	r_i := <-resp_ch
 	return r_i.(*Chunk)
 }
+func (sb *Buffer) Latest() *Chunk {
+	resp_ch := make(chan interface{})
+	sb.cmd_ch <- command{
+		cmdId: sb_cmd_latest,
+		resp:  resp_ch,
+	}
+	r_i := <-resp_ch
+	return r_i.(*Chunk)
+}
+
+func (sb *Buffer) getLatest() *Chunk {
+	if len(sb.buf) == 0 {
+		return nil
+	}
+	return sb.buf[len(sb.buf)-1]
+}
+
 
 func (sb *Buffer) getLatestUseful(chunks []uint64) *Chunk {
 	if len(chunks) == 0 && len(sb.buf) != 0 {
@@ -183,6 +201,9 @@ func (sb *Buffer) Serve() {
 			case sb_cmd_latest_useful:
 				buf_log.Debugf("BUF: Got latest useful")
 				cmd.resp <- sb.getLatestUseful(cmd.args.([]uint64))
+			case sb_cmd_latest:
+				buf_log.Debugf("BUF: Got latest")
+				cmd.resp <- sb.getLatest()
 			default:
 				buf_log.Debugf("BUF: Got undefined command %#v", cmd)
 			}

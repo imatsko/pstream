@@ -9,6 +9,8 @@ import (
 	"net"
 	"sync"
 	"time"
+	"sort"
+	"math"
 )
 
 const (
@@ -507,7 +509,8 @@ func (p *PeerImpl) handleCmdUnexpected(cmd command) {
 }
 
 func (p *PeerImpl) handleSend() {
-	p.handleSendRandom()
+	//p.handleSendRandom()
+	p.handleSendDesired()
 }
 
 //========================================================================
@@ -712,6 +715,93 @@ func (p *PeerImpl) handleSendRandom() {
 		p.log.Printf("Nothing to send (%v %v)", chunk, conn)
 		return
 	}
+
+	p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn.ConnId)
+	conn.Send(chunk)
+	p.log.Printf("Chunk %v to sink %v delivered", chunk.Id, conn.ConnId)
+}
+
+//========================================================
+// send most useful to desired
+//=======================================================
+
+
+func desirability(n *PeerNeighboursState) float64 {
+	if n == nil {
+		peer_log.Infof("empty neighbours")
+		return 0
+	}
+	power := len(n.Sinks)
+	return math.Sqrt(float64(power))
+}
+
+type sink_rate struct {
+	id string
+	latest_useful *Chunk
+	d float64
+}
+
+type by_latest []sink_rate
+
+
+func (a by_latest) Len() int           { return len(a) }
+func (a by_latest) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a by_latest) Less(i, j int) bool {
+	if a[i].latest_useful.Id < a[j].latest_useful.Id {
+		return true
+	} else if a[i].latest_useful.Id == a[j].latest_useful.Id {
+		return a[i].d < a[j].d
+	}
+	return false
+}
+
+
+func (p *PeerImpl) handleSendDesired() {
+	if len(p.sink_conn) == 0 {
+		p.log.Printf("No clients")
+		return
+	}
+
+	//latestChunk := p.buf.Latest()
+
+	sinks := make([]sink_rate, 0)
+	for id, conn := range p.sink_conn {
+		conn_buf := conn.Buffer()
+		if conn_buf == nil {
+			p.log.Printf("Sink %v empty buf info", conn.ConnId)
+
+			//if latestChunk != nil {
+			//	sinks = append(sinks, sink_rate{id: id, latest_useful: latestChunk, d: 0})
+			//}
+			continue
+		}
+		latest_useful := p.buf.LatestUseful(conn_buf.Chunks)
+		if latest_useful == nil {
+			p.log.Printf("Sink %v nothing useful", conn.ConnId)
+			continue
+		}
+
+		p.log.Printf("Sink %v useful %#v", conn.ConnId, latest_useful.Id)
+
+		neighbours := conn.Neighbours()
+		p.log.Printf("Sink %v neighbours %#v", conn.ConnId, neighbours)
+
+		des := desirability(neighbours)
+		p.log.Printf("Sink %v desirability %v", conn.ConnId, des)
+
+		sinks = append(sinks, sink_rate{id: id, latest_useful: latest_useful, d: des})
+	}
+	if len(sinks) == 0 {
+		p.log.Printf("Nothing to send")
+		return
+	}
+
+	sort.Sort(by_latest(sinks))
+
+	most_useful := sinks[len(sinks)-1]
+
+	conn := p.sink_conn[most_useful.id]
+	chunk := most_useful.latest_useful
 
 	p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn.ConnId)
 	conn.Send(chunk)
