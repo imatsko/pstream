@@ -32,6 +32,7 @@ const (
 	conn_cmd_get_neighbours = 8
 
 
+	CONN_SEND_TIMEOUT     = 100 * time.Millisecond
 	CONN_UPDATE_PERIOD     = 5 * time.Second
 	CONN_ASK_UPDATE_PERIOD = 10 * time.Second
 )
@@ -134,7 +135,11 @@ func (c *Connection) Send(chunk *Chunk) {
 		args:  chunk,
 		resp:  resp_chan,
 	}
-	<-resp_chan
+
+	select {
+	case <-resp_chan:
+	case <-time.After(CONN_SEND_TIMEOUT):
+	}
 }
 
 func (c *Connection) Buffer() *BufferState {
@@ -173,7 +178,7 @@ func (c *Connection) Serve() {
 	for {
 		select {
 		case <-c.close:
-			conn_log.Warningf("connection %d: quit received", c.ConnId)
+			//conn_log.Warningf("connection %d: quit received", c.ConnId)
 			return
 		case cmd := <-c.cmd_ch:
 			switch cmd.cmdId {
@@ -238,7 +243,7 @@ func (c *Connection) scheduleSendUpdate() {
 		select {
 		case <-c.close:
 			//close connection
-			conn_log.Warningf("connection %v: Handle close connection", c.ConnId)
+			//conn_log.Warningf("connection %v: Handle close connection", c.ConnId)
 			return
 		case <-t.C:
 			c.SendUpdate()
@@ -257,7 +262,7 @@ func (c *Connection) scheduleSendAskUpdate() {
 		select {
 		case <-c.close:
 			//close connection
-			conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
+			//conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
 			return
 		case <-t.C:
 			c.AskUpdate()
@@ -267,7 +272,7 @@ func (c *Connection) scheduleSendAskUpdate() {
 
 func (c *Connection) handleCmdInit(cmd command) {
 	if c.ConnType == CONN_UNDEFINED {
-		conn_log.Errorf("Unexpected send init type")
+		//conn_log.Errorf("Unexpected send init type")
 		return
 	}
 
@@ -286,7 +291,7 @@ func (c *Connection) handleCmdInit(cmd command) {
 }
 
 func (c *Connection) handleCmdClose(cmd command) {
-	conn_log.Warningf("connection %d: Got close cmd", c.ConnId)
+	//conn_log.Warningf("connection %d: Got close cmd", c.ConnId)
 	c.Peer.ConnectionClosed(c)
 	close(c.close)
 }
@@ -308,13 +313,13 @@ func (c *Connection) handleCmdSendData(cmd command) {
 }
 
 func (c *Connection) handleCmdSendUpdate(cmd command) {
-	conn_log.Infof("SEND update")
+	//conn_log.Infof("SEND update")
 
 	upd_msg := UpdateMessage{
 		Buffer:     c.Peer.Buffer(),
 		Neighbours: c.Peer.Neighbours(),
 	}
-	conn_log.Infof("SEND update %v", upd_msg)
+	//conn_log.Infof("SEND update %v", upd_msg)
 
 	answer_msg := ProtocolMessage{
 		MsgType: PROTO_UPDATE,
@@ -327,7 +332,7 @@ func (c *Connection) handleCmdSendUpdate(cmd command) {
 func (c *Connection) handleCmdSendUpdateChunk(cmd command) {
 	chunk_id := cmd.args.(uint64)
 
-	conn_log.Infof("Send update chunk %v", chunk_id)
+	//conn_log.Infof("Send update chunk %v", chunk_id)
 
 	upd_msg := UpdateChunkMessage{NewChunk: chunk_id}
 	answer_msg := ProtocolMessage{
@@ -355,7 +360,7 @@ func (c *Connection) handleCmdGetNeighbours(cmd command) {
 }
 
 func (c *Connection) handleCmdUnexpected(cmd command) {
-	conn_log.Warningf("connection %d: Got unexpected comand %#v", c.ConnId, cmd)
+	//conn_log.Warningf("connection %d: Got unexpected comand %//v", c.ConnId, cmd)
 }
 
 func (c *Connection) handleMsgInit(msg ProtocolMessage) {
@@ -377,14 +382,14 @@ func (c *Connection) handleMsgInit(msg ProtocolMessage) {
 		c.ConnType = CONN_RECV
 		c.Peer.ConnectionOpened(c)
 	default:
-		conn_log.Errorf("Unexpected connection type %v", init)
+		//conn_log.Errorf("Unexpected connection type %v", init)
 		c.Close()
 	}
 }
 
 func (c *Connection) handleMsgData(msg ProtocolMessage) {
 	if c.ConnType != CONN_RECV {
-		conn_log.Warningf("connection %d: Only receivers can store new data", c.ConnId)
+		//conn_log.Warningf("connection %d: Only receivers can store new data", c.ConnId)
 		return
 	}
 
@@ -394,7 +399,7 @@ func (c *Connection) handleMsgData(msg ProtocolMessage) {
 
 func (c *Connection) handleMsgAskUpdate(msg ProtocolMessage) {
 	if c.ConnType != CONN_RECV {
-		conn_log.Warningf("connection %d: Only receivers can send state", c.ConnId)
+		//conn_log.Warningf("connection %d: Only receivers can send state", c.ConnId)
 		return
 	}
 
@@ -403,31 +408,31 @@ func (c *Connection) handleMsgAskUpdate(msg ProtocolMessage) {
 
 func (c *Connection) handleMsgUpdate(msg ProtocolMessage) {
 	state := msg.Payload.(UpdateMessage)
-	conn_log.Infof("Got update %v", state)
+	//conn_log.Infof("Got update %v", state)
 	c.buffer_state = &state.Buffer
 	c.neighbours_state = &state.Neighbours
 }
 
 func (c *Connection) handleMsgUpdateChunk(msg ProtocolMessage) {
 	if c.ConnType != CONN_SEND {
-		conn_log.Warningf("connection %d: Only senders can recv update", c.ConnId)
+		//conn_log.Warningf("connection %d: Only senders can recv update", c.ConnId)
 		return
 	}
 
 	chunk := msg.Payload.(UpdateChunkMessage)
-	conn_log.Infof("Got update chunk %v", chunk)
+	//conn_log.Infof("Got update chunk %v", chunk)
 	if c.buffer_state != nil {
 		c.buffer_state.Chunks = append(c.buffer_state.Chunks, chunk.NewChunk)
 	}
 }
 
 func (c *Connection) handleMsgClose(msg ProtocolMessage) {
-	conn_log.Warningf("connection %d: Got close msg", c.ConnId)
+	//conn_log.Warningf("connection %d: Got close msg", c.ConnId)
 	c.Close()
 }
 
 func (c *Connection) handleUnexpected(msg ProtocolMessage) {
-	conn_log.Warningf("connection %d: Got unexpected message %#v", c.ConnId, msg)
+	//conn_log.Warningf("connection %d: Got unexpected message %//v", c.ConnId, msg)
 }
 
 func (c *Connection) serveRecv() {
@@ -436,7 +441,7 @@ func (c *Connection) serveRecv() {
 		select {
 		case <-c.close:
 			//close connection
-			conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
+			//conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
 			c.stream.Close()
 			return
 		default:
@@ -445,15 +450,15 @@ func (c *Connection) serveRecv() {
 		err := decoder.Decode(&recvMessage)
 		if err != nil {
 			if err.Error() == "EOF" {
-				conn_log.Errorf("connection %d: input decode err %#v", c.ConnId, err)
-				conn_log.Warningf("connection %d: Close connection by EOF", c.ConnId)
+				//conn_log.Errorf("connection %d: input decode err %//v", c.ConnId, err)
+				//conn_log.Warningf("connection %d: Close connection by EOF", c.ConnId)
 				c.in_msg <- ProtocolMessage{MsgType: PROTO_CLOSE}
 				return
 			}
-			conn_log.Errorf("connection %d: input decode err %#v", c.ConnId, err)
+			//conn_log.Errorf("connection %d: input decode err %//v", c.ConnId, err)
 			continue
 		}
-		conn_log.Debugf("connection %d: recv msg %#v", c.ConnId, recvMessage)
+		//conn_log.Debugf("connection %d: recv msg %//v", c.ConnId, recvMessage)
 		c.in_msg <- recvMessage
 	}
 }
@@ -463,15 +468,15 @@ func (c *Connection) serveSend() {
 	for {
 		select {
 		case <-c.close:
-			conn_log.Debugf("connection %d: quit send", c.ConnId)
+			//conn_log.Debugf("connection %d: quit send", c.ConnId)
 			return
 		default:
 		}
 		sendMessage := <-c.out_msg
-		conn_log.Debugf("connection %d: send msg %#v", c.ConnId, sendMessage)
+		//conn_log.Debugf("connection %d: send msg %//v", c.ConnId, sendMessage)
 		err := encoder.Encode(sendMessage)
 		if err != nil {
-			conn_log.Errorf("connection %d: output encode err %v", c.ConnId, err)
+			//conn_log.Errorf("connection %d: output encode err %v", c.ConnId, err)
 			continue
 		}
 	}

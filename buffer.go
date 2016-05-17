@@ -14,8 +14,8 @@ type Chunk struct {
 }
 
 const (
-	SB_SIZE                = 100
-	SB_MAX_SIZE            = 200
+	SB_SIZE                = 10
+	SB_MAX_SIZE            = 50
 	SB_NEXT_CHUNK_PERIOD   = 100 * time.Millisecond // 10 chunks per second
 	SB_NEXT_CHUNK_DEADLINE = 5 * SB_NEXT_CHUNK_PERIOD
 	sb_cmd_state           = 1
@@ -110,6 +110,11 @@ func (sb *Buffer) State() BufferState {
 }
 
 func (sb *Buffer) LatestUseful(chunks []uint64) *Chunk {
+	if len(chunks) > SB_MAX_SIZE {
+		rm_pos := len(chunks) - SB_MAX_SIZE - 1
+		chunks = chunks[rm_pos:]
+	}
+
 	resp_ch := make(chan interface{})
 	sb.cmd_ch <- command{
 		cmdId: sb_cmd_latest_useful,
@@ -151,17 +156,17 @@ func (sb *Buffer) sendAny() bool {
 
 		nextId, pos, err := sb.next_id(sb.lastId)
 		if err != nil {
-			buf_log.Infof("Next chunk for %d not found (%v)", sb.lastId, err)
+			buf_log.Infof("BUF: Next chunk for %d not found (%v)", sb.lastId, err)
 			break
 		}
 		if nextId != sb.lastId+1 {
-			buf_log.Infof("Next chunk for %d is %d and not following, wait", sb.lastId, nextId)
+			buf_log.Infof("BUF: Next chunk for %d is %d and not following, wait", sb.lastId, nextId)
 			break
 		}
 		sb.BufOut <- sb.buf[pos]
 		sb.lastId = nextId
 		sent = true
-		buf_log.Debugf("Chunk %d sent", nextId)
+		buf_log.Debugf("BUF: Chunk %d sent", nextId)
 	}
 	return sent
 }
@@ -173,18 +178,18 @@ func (sb *Buffer) Serve() {
 		case cmd := <-sb.cmd_ch:
 			switch cmd.cmdId {
 			case sb_cmd_state:
-				buf_log.Debugf("Got collect state %#v", cmd)
+				buf_log.Debugf("BUF: Got collect state %#v", cmd)
 				cmd.resp <- sb.collectState()
 			case sb_cmd_latest_useful:
-				buf_log.Debugf("Got latest useful %#v", cmd)
+				buf_log.Debugf("BUF: Got latest useful")
 				cmd.resp <- sb.getLatestUseful(cmd.args.([]uint64))
 			default:
-				buf_log.Debugf("Got undefined command %#v", cmd)
+				buf_log.Debugf("BUF: Got undefined command %#v", cmd)
 			}
 		case c := <-sb.BufIn:
-			buf_log.Debugf("Got chunk %d", c.Id)
+			buf_log.Debugf("BUF: Got chunk %d", c.Id)
 			if c.Id <= sb.lastId {
-				buf_log.Infof("Chunk %d already played, skip", c.Id)
+				buf_log.Infof("BUF: Chunk %d already played, skip", c.Id)
 				continue
 			}
 			sb.insert(c)
@@ -195,12 +200,12 @@ func (sb *Buffer) Serve() {
 			deadline_ch = time.After(SB_NEXT_CHUNK_DEADLINE)
 			nextId, pos, err := sb.next_id(sb.lastId)
 			if err != nil {
-				buf_log.Infof("Next chunk for %d not found (%v) on deadline", sb.lastId, err)
+				buf_log.Infof("BUF: Next chunk for %d not found (%v) on deadline", sb.lastId, err)
 				continue
 			}
 			sb.BufOut <- sb.buf[pos]
 			sb.lastId = nextId
-			buf_log.Debugf("Chunk %d sent by deadline", nextId)
+			buf_log.Debugf("BUF: Chunk %d sent by deadline", nextId)
 			// trigger send rest ready chunks
 			if sb.sendAny() {
 				deadline_ch = time.After(SB_NEXT_CHUNK_DEADLINE)

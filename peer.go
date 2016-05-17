@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	PEER_FIXED_COUNT = 10
+	PEER_FIXED_COUNT = 5
 	PEER_MIN_SOURCES = 2
 	PEER_MIN_SINKS = 1
 
@@ -221,9 +221,12 @@ select {
 	case <-p.quit:
 		return
 	case chunk := <-p.In:
+		p.log.Printf("Event new chunk")
+
 		p.buf_input <- chunk
 		p.NotifyUpdate(chunk.Id)
 	case cmd := <-p.cmd_ch:
+		p.log.Printf("Event new cmd %v", cmd)
 			switch cmd.cmdId {
 			case peer_cmd_close:
 				p.handleCmdClose(cmd)
@@ -243,6 +246,7 @@ select {
 				p.handleCmdUnexpected(cmd)
 			}
 		case <-p.rate_ch:
+			p.log.Printf("Event send rate")
 			p.handleSend()
 		}
 	}
@@ -709,7 +713,7 @@ func (p *PeerImpl) handleSendRandom() {
 		return
 	}
 
-	p.log.Printf("Send chunk %#v to sink %#v", chunk, conn)
+	p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn.ConnId)
 	conn.Send(chunk)
-	p.log.Printf("Chunk %#v to sink %#v delivered", chunk, conn)
+	p.log.Printf("Chunk %v to sink %v delivered", chunk.Id, conn.ConnId)
 }

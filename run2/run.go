@@ -35,7 +35,7 @@ var Config = struct {
 }{
 	ConfFile:      "config.json",
 	Listen:        "127.0.0.1:9000",
-	SourceChunks:  500,
+	SourceChunks:  10000,
 	SendPeriod:    time.Millisecond * 100,
 	BootstrapList: StringComaList(make([]string, 0)),
 }
