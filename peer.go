@@ -5,25 +5,23 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/op/go-logging"
+	"math"
 	"math/rand"
 	"net"
+	"sort"
 	"sync"
 	"time"
-	"sort"
-	"math"
 )
 
-
-const STREAM_CHUNK_PERIOD = time.Millisecond*100
-
+const STREAM_CHUNK_PERIOD = time.Millisecond * 500
 
 const (
 	PEER_FIXED_COUNT = 5
 	PEER_MIN_SOURCES = 2
-	PEER_MIN_SINKS = 1
+	PEER_MIN_SINKS   = 1
 
-	PEER_NETWORK_RECONFIGURE_PERIOD = time.Second*5
-	PEER_NETWORK_RECONFIGURE_PERIOD_INIT = time.Second*1
+	PEER_NETWORK_RECONFIGURE_PERIOD      = time.Second * 5
+	PEER_NETWORK_RECONFIGURE_PERIOD_INIT = time.Second * 1
 )
 
 const (
@@ -40,7 +38,7 @@ var peer_log = logging.MustGetLogger("peer")
 
 type logger struct {
 	prefix string
-	log *logging.Logger
+	log    *logging.Logger
 }
 
 func NewLogger(l *logging.Logger, p string) *logger {
@@ -79,7 +77,6 @@ type Peer interface {
 }
 
 type PeerImpl struct {
-
 	log        *logger
 	selfId     string
 	listenAddr string
@@ -93,10 +90,9 @@ type PeerImpl struct {
 	sendPeriod time.Duration
 	rate_ch    chan bool
 
-
 	addr_mut sync.Mutex
-	port int
-	host string
+	port     int
+	host     string
 
 	quit   chan bool
 	cmd_ch chan command
@@ -122,7 +118,7 @@ func NewPeer(selfId string, listen string, sendPeriod time.Duration) *PeerImpl {
 	p.In = make(chan *Chunk)
 	p.Out = make(chan *Chunk, 32)
 
-	p.buf_input = make(chan *Chunk)
+	p.buf_input = make(chan *Chunk, 32)
 	p.buf = NewBuffer(p.buf_input, p.Out)
 
 	p.cmd_ch = make(chan command, 32)
@@ -217,22 +213,20 @@ func (p *PeerImpl) Serve() {
 	}
 
 	if p.listenAddr != "" {
-go p.ServeConnections()
-}
+		go p.ServeConnections()
+	}
 
-go p.ServeReconfigure(PEER_NETWORK_RECONFIGURE_PERIOD)
+	go p.ServeReconfigure(PEER_NETWORK_RECONFIGURE_PERIOD)
 
-for {
-select {
-	case <-p.quit:
-		return
-	case chunk := <-p.In:
-		p.log.Printf("Event new chunk")
-
-		p.buf_input <- chunk
-		p.NotifyUpdate(chunk.Id)
-	case cmd := <-p.cmd_ch:
-		p.log.Printf("Event new cmd %v", cmd)
+	for {
+		select {
+		case <-p.quit:
+			return
+		case chunk := <-p.In:
+			p.log.Printf("New chunk %d", chunk.Id)
+			p.buf_input <- chunk
+			p.NotifyUpdate(chunk.Id)
+		case cmd := <-p.cmd_ch:
 			switch cmd.cmdId {
 			case peer_cmd_close:
 				p.handleCmdClose(cmd)
@@ -252,7 +246,7 @@ select {
 				p.handleCmdUnexpected(cmd)
 			}
 		case <-p.rate_ch:
-			p.log.Printf("Event send rate")
+			//p.log.Printf("Try send")
 			p.handleSend()
 		}
 	}
@@ -327,7 +321,7 @@ func (p *PeerImpl) createSinkConnection(addr string) {
 
 func (p *PeerImpl) handleCmdNotifyUpdate(cmd command) {
 	chunk_id := cmd.args.(uint64)
-	p.log.Printf("Got update %v", chunk_id)
+	//p.log.Printf("Notify update %v", chunk_id)
 	for _, conn := range p.src_conn {
 		conn.SendUpdateChunk(chunk_id)
 	}
@@ -368,7 +362,7 @@ func (p *PeerImpl) collectNetworkStatus() PeerNeighboursState {
 			}
 			res = append(res,
 				PeerStat{
-					Id: id,
+					Id:          id,
 					Host:        host,
 					Port:        port,
 					SourceCount: source_count,
@@ -450,7 +444,6 @@ func (p *PeerImpl) getIndirectPeers() map[string]PeerStat {
 
 	return res_map
 }
-
 
 func (p *PeerImpl) handleCmdNetworkStatus(cmd command) {
 	p.log.Printf("get network status %v", cmd)
@@ -580,7 +573,6 @@ func (p *PeerImpl) Exit() {
 	}
 }
 
-
 //============================================================================
 // algo implement
 //=============================================================================
@@ -599,7 +591,7 @@ func (p *PeerImpl) reconfigureNetworkFixedN() {
 	}
 	p.log.Printf("RECONFIGURE diff %v", diff)
 
-	if diff < 0  {
+	if diff < 0 {
 		p.openRandom(-diff)
 	} else {
 		p.closeRandom(diff)
@@ -620,12 +612,12 @@ func (p *PeerImpl) closeRandom(n int) {
 
 	id_list := make(map[string]interface{})
 
-	ids := make([]string,0)
+	ids := make([]string, 0)
 	for id, _ := range p.sink_conn {
 		ids = append(ids, id)
 	}
 
-	for ; len(id_list) < n; {
+	for len(id_list) < n {
 		i := rand.Intn(len(ids))
 		if _, ok := id_list[ids[i]]; ok {
 			//already in result
@@ -650,10 +642,9 @@ func (p *PeerImpl) openRandom(n int) {
 	peers := p.getIndirectPeers()
 	p.log.Printf("RECONFIGURE peers %v", peers)
 
-
 	id_list := make(map[string]interface{})
 
-	ids := make([]string,0)
+	ids := make([]string, 0)
 	for id, _ := range peers {
 		ids = append(ids, id)
 	}
@@ -667,7 +658,7 @@ func (p *PeerImpl) openRandom(n int) {
 		return
 	}
 
-	for ; len(id_list) < n; {
+	for len(id_list) < n {
 		i := rand.Intn(len(ids))
 		if _, ok := id_list[ids[i]]; ok {
 			//already in result
@@ -729,7 +720,6 @@ func (p *PeerImpl) handleSendRandom() {
 // send most useful to desired
 //=======================================================
 
-
 func desirability(n *PeerNeighboursState) float64 {
 	if n == nil {
 		peer_log.Infof("empty neighbours")
@@ -740,16 +730,15 @@ func desirability(n *PeerNeighboursState) float64 {
 }
 
 type sink_rate struct {
-	id string
+	id            string
 	latest_useful *Chunk
-	d float64
+	d             float64
 }
 
 type by_latest []sink_rate
 
-
-func (a by_latest) Len() int           { return len(a) }
-func (a by_latest) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a by_latest) Len() int      { return len(a) }
+func (a by_latest) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 func (a by_latest) Less(i, j int) bool {
 	if a[i].latest_useful.Id < a[j].latest_useful.Id {
 		return true
@@ -763,7 +752,7 @@ func select_random_proportionally(sinks by_latest) sink_rate {
 	sort.Sort(sinks)
 
 	// TODO select random proportionally
-	return sinks[len(sinks) - 1]
+	return sinks[len(sinks)-1]
 }
 
 func (p *PeerImpl) handleSendDesired() {
@@ -778,7 +767,7 @@ func (p *PeerImpl) handleSendDesired() {
 	for id, conn := range p.sink_conn {
 		conn_buf := conn.Buffer()
 		if conn_buf == nil {
-			p.log.Printf("Sink %v empty buf info", conn.ConnId)
+			//p.log.Printf("Sink %v empty buf info", conn.ConnId)
 
 			//if latestChunk != nil {
 			//	sinks = append(sinks, sink_rate{id: id, latest_useful: latestChunk, d: 0})
@@ -787,17 +776,17 @@ func (p *PeerImpl) handleSendDesired() {
 		}
 		latest_useful := p.buf.LatestUseful(conn_buf.Chunks)
 		if latest_useful == nil {
-			p.log.Printf("Sink %v nothing useful", conn.ConnId)
+			//p.log.Printf("Sink %v nothing useful", conn.ConnId)
 			continue
 		}
 
-		p.log.Printf("Sink %v useful %#v", conn.ConnId, latest_useful.Id)
+		//p.log.Printf("Sink %v useful %#v", conn.ConnId, latest_useful.Id)
 
 		neighbours := conn.Neighbours()
-		p.log.Printf("Sink %v neighbours %#v", conn.ConnId, neighbours)
+		//p.log.Printf("Sink %v neighbours %#v", conn.ConnId, neighbours)
 
 		des := desirability(neighbours)
-		p.log.Printf("Sink %v desirability %v", conn.ConnId, des)
+		//p.log.Printf("Sink %v desirability %v", conn.ConnId, des)
 
 		sinks = append(sinks, sink_rate{id: id, latest_useful: latest_useful, d: des})
 	}
@@ -813,5 +802,5 @@ func (p *PeerImpl) handleSendDesired() {
 
 	p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn.ConnId)
 	conn.Send(chunk)
-	p.log.Printf("Chunk %v to sink %v delivered", chunk.Id, conn.ConnId)
+	//p.log.Printf("Chunk %v to sink %v delivered", chunk.Id, conn.ConnId)
 }

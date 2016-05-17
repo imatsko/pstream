@@ -5,6 +5,7 @@ import (
 	"github.com/op/go-logging"
 	"net"
 	"time"
+	"sync"
 )
 
 var conn_log = logging.MustGetLogger("connection")
@@ -87,7 +88,9 @@ type Connection struct {
 	PeerId           string
 
 	// TODO protect buff and neighb state
+	buf_mut sync.Mutex
 	buffer_state     *BufferState
+	neighbours_mut sync.Mutex
 	neighbours_state *PeerNeighboursState
 	stream           net.Conn
 	log              *logging.Logger
@@ -136,10 +139,10 @@ func (c *Connection) Send(chunk *Chunk) {
 		resp:  resp_chan,
 	}
 
-	select {
-	case <-resp_chan:
+	//select {
+	//case <-resp_chan:
 	//case <-time.After(CONN_SEND_TIMEOUT):
-	}
+	//}
 }
 
 func (c *Connection) Buffer() *BufferState {
@@ -151,7 +154,17 @@ func (c *Connection) Buffer() *BufferState {
 	//}
 	//return (<-resp_chan).(*BufferState)
 
-	return c.buffer_state
+	c.buf_mut.Lock()
+	defer c.buf_mut.Unlock()
+	if c.buffer_state == nil {
+		return nil
+	}
+
+	new_state := new(BufferState)
+	new_state.LastId = c.buffer_state.LastId
+	new_state.Chunks = c.buffer_state.Chunks[:]
+
+	return new_state
 }
 
 func (c *Connection) Neighbours() *PeerNeighboursState {
@@ -163,7 +176,16 @@ func (c *Connection) Neighbours() *PeerNeighboursState {
 	//}
 	//return (<-resp_chan).(*PeerNeighboursState)
 
-	return c.neighbours_state
+	c.neighbours_mut.Lock()
+	defer c.neighbours_mut.Unlock()
+	if c.neighbours_state == nil {
+		return nil
+	}
+
+	new_state := new(PeerNeighboursState)
+	new_state.Sinks = c.neighbours_state.Sinks[:]
+	new_state.Sources = c.neighbours_state.Sources[:]
+	return new_state
 }
 
 func (c *Connection) Serve() {
@@ -317,6 +339,9 @@ func (c *Connection) handleCmdSendData(cmd command) {
 }
 
 func (c *Connection) updateChunks(id uint64) {
+	c.buf_mut.Lock()
+	defer c.buf_mut.Unlock()
+
 	if c.buffer_state == nil {
 		return
 	}
@@ -434,8 +459,12 @@ func (c *Connection) handleMsgAskUpdate(msg ProtocolMessage) {
 func (c *Connection) handleMsgUpdate(msg ProtocolMessage) {
 	state := msg.Payload.(UpdateMessage)
 	//conn_log.Infof("Got update %v", state)
+	c.buf_mut.Lock()
 	c.buffer_state = &state.Buffer
+	c.buf_mut.Unlock()
+	c.neighbours_mut.Lock()
 	c.neighbours_state = &state.Neighbours
+	c.neighbours_mut.Unlock()
 }
 
 func (c *Connection) handleMsgUpdateChunk(msg ProtocolMessage) {
