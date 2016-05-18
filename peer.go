@@ -248,14 +248,64 @@ func (p *PeerImpl) ServeSendRateBuf(rate float64) {
 	}
 }
 
+func (p *PeerImpl) ServeSendRate2(rate float64) {
+	p.log.Printf("start rate %v", rate)
+	period := STREAM_CHUNK_PERIOD
+
+	ticker := time.NewTicker(period).C
+	p.rate_ch = make(chan bool,int(math.Ceil(rate)))
+
+	for {
+		select {
+		case <-p.quit:
+			return
+		case <-ticker:
+			for i:=0; float64(i) < rate; i += 1 {
+				p.rate_ch <- true
+			}
+		default:
+		}
+	}
+}
+
+func (p *PeerImpl) ServeSendRateBuf2(rate float64) {
+	p.log.Printf("start rate %v", rate)
+	period := STREAM_CHUNK_PERIOD
+	p.log.Printf("period %v", period)
+
+
+	ticker := time.NewTicker(period).C
+
+	//p.rate_ch = make(chan bool)
+	p.rate_ch = make(chan bool,int(math.Ceil(rate)))
+	var prev float64
+	var count int64
+	for {
+		select {
+		case <-p.quit:
+			return
+		default:
+			if float64(count) <= prev {
+				//p.log.Printf("send %v %v", count, prev)
+				count += 1
+				p.rate_ch <- true
+			} else {
+				//p.log.Printf("sleep %v %v", count, prev)
+				prev += rate
+				<-ticker
+			}
+		}
+	}
+}
 
 func (p *PeerImpl) Serve() {
 
 	if p.send_rate >= 100 {
 		go p.ServeInfiniteSendRate()
 	} else {
+		go p.ServeSendRateBuf2(p.send_rate)
 		//go p.ServeSendRate(p.send_rate)
-		go p.ServeSendRateBuf(p.send_rate)
+		//go p.ServeSendRateBuf(p.send_rate)
 		//go p.ServeSendRateSleep(p.sendPeriod)
 	}
 
