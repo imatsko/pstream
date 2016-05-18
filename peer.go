@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"math"
 )
 
 const STREAM_CHUNK_PERIOD = time.Millisecond * 100
@@ -221,15 +222,28 @@ func (p *PeerImpl) ServeInfiniteSendRate() {
 }
 
 func (p *PeerImpl) ServeSendRateBuf(rate float64) {
-	p.log.Printf("start unlimited rate")
+	p.log.Printf("start rate %v", rate)
+	period := time.Duration(float64(STREAM_CHUNK_PERIOD)/rate)
+	p.log.Printf("period %v", period)
 
-	//period := STREAM_CHUNK_PERIOD/rate
-	p.rate_ch = make(chan bool,5)
+	//p.rate_ch = make(chan bool)
+	p.rate_ch = make(chan bool,int(math.Ceil(rate)))
+	var prev float64
+	var count int64
 	for {
 		select {
 		case <-p.quit:
 			return
-		case p.rate_ch <- true:
+		default:
+			if float64(count) <= prev {
+				//p.log.Printf("send %v %v", count, prev)
+				count += 1
+				p.rate_ch <- true
+			} else {
+				//p.log.Printf("sleep %v %v", count, prev)
+				prev += rate
+				time.Sleep(STREAM_CHUNK_PERIOD)
+			}
 		}
 	}
 }
@@ -240,8 +254,8 @@ func (p *PeerImpl) Serve() {
 	if p.send_rate >= 100 {
 		go p.ServeInfiniteSendRate()
 	} else {
-		go p.ServeSendRate(p.send_rate)
-		//go p.ServeSendRateBuf(p.send_rate)
+		//go p.ServeSendRate(p.send_rate)
+		go p.ServeSendRateBuf(p.send_rate)
 		//go p.ServeSendRateSleep(p.sendPeriod)
 	}
 
