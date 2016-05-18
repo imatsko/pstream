@@ -14,8 +14,8 @@ type Chunk struct {
 }
 
 const (
-	SB_SIZE                = 10
 	SB_MAX_SIZE            = 50
+	SB_NEW_MAX_SIZE        = 40
 	SB_NEXT_CHUNK_DEADLINE = 5 * STREAM_CHUNK_PERIOD
 	sb_cmd_state           = 1
 	sb_cmd_latest_useful   = 2
@@ -37,7 +37,7 @@ type Buffer struct {
 
 func NewBuffer(in <-chan *Chunk, out chan<- *Chunk) *Buffer {
 	sb := new(Buffer)
-	sb.buf = make([]*Chunk, 0, SB_SIZE)
+	sb.buf = make([]*Chunk, 0, SB_MAX_SIZE)
 	sb.cmd_ch = make(chan command)
 	sb.BufOut = out
 	sb.BufIn = in
@@ -72,8 +72,16 @@ func (sb *Buffer) cleanup() {
 	if len(sb.buf) <= SB_MAX_SIZE {
 		return
 	}
-	rm_pos := len(sb.buf) - SB_MAX_SIZE - 1
-	sb.buf = sb.buf[rm_pos:]
+	rm_pos := len(sb.buf) - SB_NEW_MAX_SIZE
+
+	new_len := len(sb.buf[rm_pos:])
+
+	new_buf := make([]*Chunk, new_len)
+
+	for i, c := range sb.buf[rm_pos:] {
+		new_buf[i] = c
+	}
+	sb.buf = new_buf
 }
 
 func (sb *Buffer) next_id(cur_id uint64) (n_id uint64, pos int, err error) {
