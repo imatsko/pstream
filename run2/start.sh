@@ -3,7 +3,7 @@
 MAIN_PATH=run2/run.go
 
 BOOTSTRAP=$1
-PERIOD=$2
+RATE=$2
 
 PORT=$3
 
@@ -12,7 +12,7 @@ MAX_NODES=$4
 COUNTER=0
 
 while [ $COUNTER -lt $MAX_NODES ]; do
-  go run $MAIN_PATH --listen ":${PORT}" --bootstrap $BOOTSTRAP --send $PERIOD &
+  go run $MAIN_PATH --listen ":${PORT}" --bootstrap $BOOTSTRAP --rate $RATE &
   PIDS[$COUNTER]=$!
   let COUNTER=COUNTER+1
   let PORT=PORT+1

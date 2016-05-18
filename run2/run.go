@@ -34,7 +34,7 @@ var Config = struct {
 	Listen        string         `json:"listen"`
 	Source        bool           `json:"source"`
 	SourceChunks  uint64         `json:"count"`
-	SendPeriod    time.Duration  `json:"send_period"`
+	SendRate    float64  `json:"send_period"`
 	BootstrapList StringComaList `json:"bootstrap"`
 	PprofListen   string         `json:"pprof"`
 
@@ -43,7 +43,7 @@ var Config = struct {
 	Listen:        "127.0.0.1:9000",
 	SourceChunks:  10000,
 	PprofListen: "",
-	SendPeriod:    time.Millisecond * 100,
+	SendRate:    1.2,
 	BootstrapList: StringComaList(make([]string, 0)),
 }
 
@@ -57,7 +57,7 @@ func init() {
 
 	flag.BoolVar(&Config.Source, "source", Config.Source, "Generate stream")
 	flag.Uint64Var(&Config.SourceChunks, "chunks", Config.SourceChunks, "Source shunk count")
-	flag.DurationVar(&Config.SendPeriod, "send", Config.SendPeriod, "Send period")
+	flag.Float64Var(&Config.SendRate, "rate", Config.SendRate, "Send rate")
 
 	flag.Var(&Config.BootstrapList, "bootstrap", "Coma separated list of bootstrap addr:port")
 	flag.Parse()
@@ -75,7 +75,7 @@ func init() {
 
 func start_source() {
 
-	p1 := pstream.NewPeer("source_sender", Config.Listen, Config.SendPeriod)
+	p1 := pstream.NewPeer("source_sender", Config.Listen, Config.SendRate)
 
 	in := p1.In
 	out := p1.Out
@@ -136,7 +136,7 @@ func start_source() {
 }
 
 func start_peer() {
-	p1 := pstream.NewPeer("", Config.Listen, Config.SendPeriod)
+	p1 := pstream.NewPeer("", Config.Listen, Config.SendRate)
 	go p1.Serve()
 
 	go func() {

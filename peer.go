@@ -83,7 +83,7 @@ type PeerImpl struct {
 	In  chan *Chunk
 	Out chan *Chunk
 
-	sendPeriod time.Duration
+	send_rate float64
 	rate_ch    chan bool
 
 	addr_mut sync.Mutex
@@ -100,7 +100,7 @@ type PeerImpl struct {
 	src_conn  map[string]*Connection
 }
 
-func NewPeer(selfId string, listen string, sendPeriod time.Duration) *PeerImpl {
+func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 	p := new(PeerImpl)
 	if selfId == "" {
 		p.generateRandomId()
@@ -109,7 +109,7 @@ func NewPeer(selfId string, listen string, sendPeriod time.Duration) *PeerImpl {
 	}
 	p.log = NewLogger(peer_log, fmt.Sprintf("PEER (%s): ", p.selfId))
 	p.listenAddr = listen
-	p.sendPeriod = sendPeriod
+	p.send_rate = rate
 
 	p.In = make(chan *Chunk)
 	p.Out = make(chan *Chunk, 32)
@@ -171,8 +171,10 @@ func (p *PeerImpl) ServeReconfigure(period time.Duration) {
 	}
 }
 
-func (p *PeerImpl) ServeSendRate(period time.Duration) {
-	p.log.Printf("start rate %v", period)
+func (p *PeerImpl) ServeSendRate(rate float64) {
+	p.log.Printf("start rate %v", rate)
+	period := time.Duration(float64(STREAM_CHUNK_PERIOD)/rate)
+
 	ticker := time.NewTicker(period).C
 	p.rate_ch = make(chan bool)
 
@@ -184,6 +186,24 @@ func (p *PeerImpl) ServeSendRate(period time.Duration) {
 			p.rate_ch <- true
 		default:
 		}
+	}
+}
+
+func (p *PeerImpl) ServeSendRateSleep(rate float64) {
+	p.log.Printf("start rate %v", rate)
+	period := time.Duration(float64(STREAM_CHUNK_PERIOD)/rate)
+
+	p.rate_ch = make(chan bool,32)
+
+	for {
+		select {
+		case <-p.quit:
+			return
+		case p.rate_ch <- true:
+		default:
+		}
+		time.Sleep(period)
+
 	}
 }
 
@@ -200,12 +220,29 @@ func (p *PeerImpl) ServeInfiniteSendRate() {
 	}
 }
 
+func (p *PeerImpl) ServeSendRateBuf(rate float64) {
+	p.log.Printf("start unlimited rate")
+
+	//period := STREAM_CHUNK_PERIOD/rate
+	p.rate_ch = make(chan bool,5)
+	for {
+		select {
+		case <-p.quit:
+			return
+		case p.rate_ch <- true:
+		}
+	}
+}
+
+
 func (p *PeerImpl) Serve() {
 
-	if p.sendPeriod == 0 {
+	if p.send_rate >= 100 {
 		go p.ServeInfiniteSendRate()
 	} else {
-		go p.ServeSendRate(p.sendPeriod)
+		go p.ServeSendRate(p.send_rate)
+		//go p.ServeSendRateBuf(p.send_rate)
+		//go p.ServeSendRateSleep(p.sendPeriod)
 	}
 
 	if p.listenAddr != "" {
