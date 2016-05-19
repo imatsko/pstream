@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"errors"
 )
 
 var conn_log = logging.MustGetLogger("connection")
@@ -32,7 +33,9 @@ const (
 	conn_cmd_get_buffer     = 7
 	conn_cmd_get_neighbours = 8
 
-	CONN_SEND_TIMEOUT      = 1500 * time.Millisecond
+	CONN_SEND_TIMEOUT      = 2 * STREAM_CHUNK_PERIOD
+	CONN_SEND_MSG_TIMEOUT  = 1000*time.Millisecond
+
 	CONN_UPDATE_PERIOD     = 5 * time.Second
 	CONN_ASK_UPDATE_PERIOD = 10 * time.Second
 )
@@ -110,7 +113,7 @@ func NewConnection(id string, conn net.Conn, t int, peer Peer) *Connection {
 	c.stream = conn
 	c.Peer = peer
 	c.ConnType = t
-	c.cmd_ch = make(chan command, 16)
+	c.cmd_ch = make(chan command)
 	c.in_msg = make(chan ProtocolMessage)
 	c.out_msg = make(chan confirmMessage)
 	c.close = make(chan bool)
@@ -202,7 +205,8 @@ func (c *Connection) Serve() {
 	for {
 		select {
 		case <-c.close:
-			//conn_log.Warningf("connection %d: quit received", c.ConnId)
+			c.stream.Close()
+		//conn_log.Warningf("connection %d: quit received", c.ConnId)
 			return
 		case cmd := <-c.cmd_ch:
 			switch cmd.cmdId {
@@ -501,7 +505,6 @@ func (c *Connection) serveRecv() {
 		case <-c.close:
 			//close connection
 			//conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
-			c.stream.Close()
 			return
 		default:
 		}
@@ -512,7 +515,6 @@ func (c *Connection) serveRecv() {
 				//conn_log.Errorf("connection %d: input decode err %//v", c.ConnId, err)
 				//conn_log.Warningf("connection %d: Close connection by EOF", c.ConnId)
 				c.in_msg <- ProtocolMessage{MsgType: PROTO_CLOSE}
-				return
 			}
 			conn_log.Errorf("connection %d: input decode err %//v", c.ConnId, err)
 			continue
@@ -535,13 +537,28 @@ func (c *Connection) serveSend() {
 		conf_msg := <-c.out_msg
 		sendMessage := *conf_msg.msg
 		//conn_log.Debugf("connection %d: send msg %//v", c.ConnId, sendMessage)
-		err := encoder.Encode(sendMessage)
+
+		res := make(chan error)
+
+		go func(){
+			err := encoder.Encode(sendMessage)
+			res <- err
+		}()
+
+
+		var err error
+		select{
+		case err = <- res:
+		case <- time.After(CONN_SEND_MSG_TIMEOUT):
+			err = errors.New("Message send timeout")
+		}
 		if conf_msg.conf != nil {
 			close(conf_msg.conf)
 		}
+
 		if err != nil {
 			conn_log.Errorf("connection %d: output encode err %v", c.ConnId, err)
-			continue
+			c.in_msg <- ProtocolMessage{MsgType: PROTO_CLOSE}
 		}
 	}
 }
