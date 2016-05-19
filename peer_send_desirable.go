@@ -64,12 +64,16 @@ func select_random_proportionally(sinks []sink_rate) sink_rate {
 }
 
 func (p *PeerImpl) handleSendDesired() {
-	if len(p.sink_conn) == 0 {
-		p.log.Printf("No clients")
+	acq := p.sim_send.TryAcquireOne()
+	if !acq {
 		return
 	}
-	p.sim_send.Acquire(1)
-	defer p.sim_send.Release(1)
+
+	if len(p.sink_conn) == 0 {
+		//p.log.Printf("No clients")
+		p.sim_send.Release(1)
+		return
+	}
 
 	//latestChunk := p.buf.Latest()
 
@@ -102,6 +106,7 @@ func (p *PeerImpl) handleSendDesired() {
 	}
 	if len(sinks) == 0 {
 		p.log.Printf("Nothing to send")
+		p.sim_send.Release(1)
 		return
 	}
 
@@ -110,7 +115,10 @@ func (p *PeerImpl) handleSendDesired() {
 	conn := p.sink_conn[selected_rate.id]
 	chunk := selected_rate.latest_useful
 
-	p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn.ConnId)
-	conn.Send(chunk)
-	//p.log.Printf("Chunk %v to sink %v delivered", chunk.Id, conn.ConnId)
+	go func() {
+		p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn.ConnId)
+		conn.Send(chunk)
+		p.log.Printf("Chunk %v to sink %v delivered", chunk.Id, conn.ConnId)
+		p.sim_send.Release(1)
+	}()
 }

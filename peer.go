@@ -78,6 +78,8 @@ type PeerImpl struct {
 	selfId     string
 	listenAddr string
 
+	Fake_recv bool
+
 	buf_input chan *Chunk
 	buf       *Buffer
 
@@ -114,12 +116,12 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 	p.listenAddr = listen
 	p.send_rate = rate
 
-	p.In = make(chan *Chunk, 16)
-	p.Out = make(chan *Chunk, 32)
+	p.In = make(chan *Chunk)
+	p.Out = make(chan *Chunk, 2)
 
-	p.buf_input = make(chan *Chunk, 32)
+	p.buf_input = make(chan *Chunk)
 
-	p.buf = NewBuffer(p.buf_input, p.Out, STREAM_CHUNK_PERIOD*5)
+	p.buf = NewBuffer(p.buf_input, p.Out, time.Duration(float64(STREAM_CHUNK_PERIOD)*1.5))
 
 	p.cmd_ch = make(chan command, 32)
 	p.quit = make(chan bool)
@@ -129,7 +131,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 	p.sink_conn = make(map[string]*Connection)
 	p.src_conn = make(map[string]*Connection)
 
-	p.sim_send = NewSemaphore(3)
+	p.sim_send = NewSemaphore(1)
 	return p
 }
 

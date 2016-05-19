@@ -81,6 +81,15 @@ func NewSemaphore(l int) *Semaphore {
 	return s
 }
 
+func (s *Semaphore) TryAcquireOne() bool {
+	select {
+	case s.c <- nil:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Semaphore) Acquire(n int) {
 	for i := 0; i < n; i += 1 {
 		s.c <- nil
