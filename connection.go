@@ -2,11 +2,11 @@ package pstream
 
 import (
 	"encoding/gob"
+	"errors"
 	"github.com/op/go-logging"
 	"net"
 	"sync"
 	"time"
-	"errors"
 )
 
 var conn_log = logging.MustGetLogger("connection")
@@ -33,8 +33,8 @@ const (
 	conn_cmd_get_buffer     = 7
 	conn_cmd_get_neighbours = 8
 
-	CONN_SEND_TIMEOUT      = 2 * STREAM_CHUNK_PERIOD
-	CONN_SEND_MSG_TIMEOUT  = 1000*time.Millisecond
+	CONN_SEND_TIMEOUT     = 2 * STREAM_CHUNK_PERIOD
+	CONN_SEND_MSG_TIMEOUT = 1000 * time.Millisecond
 
 	CONN_UPDATE_PERIOD     = 5 * time.Second
 	CONN_ASK_UPDATE_PERIOD = 10 * time.Second
@@ -206,7 +206,7 @@ func (c *Connection) Serve() {
 		select {
 		case <-c.close:
 			c.stream.Close()
-		//conn_log.Warningf("connection %d: quit received", c.ConnId)
+			//conn_log.Warningf("connection %d: quit received", c.ConnId)
 			return
 		case cmd := <-c.cmd_ch:
 			switch cmd.cmdId {
@@ -540,16 +540,15 @@ func (c *Connection) serveSend() {
 
 		res := make(chan error)
 
-		go func(){
+		go func() {
 			err := encoder.Encode(sendMessage)
 			res <- err
 		}()
 
-
 		var err error
-		select{
-		case err = <- res:
-		case <- time.After(CONN_SEND_MSG_TIMEOUT):
+		select {
+		case err = <-res:
+		case <-time.After(CONN_SEND_MSG_TIMEOUT):
 			err = errors.New("Message send timeout")
 		}
 		if conf_msg.conf != nil {
