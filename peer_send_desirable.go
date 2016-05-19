@@ -59,7 +59,7 @@ func select_random_proportionally(sinks []sink_rate) sink_rate {
 		selectable[i] = latest_useful[i]
 	}
 
-	res := SelectRandomProportionally(selectable)
+	res := SelectRandomItemProportionally(selectable)
 	return res.(sink_rate)
 }
 

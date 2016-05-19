@@ -5,35 +5,56 @@ import (
 	"math"
 	"math/rand"
 	_ "time"
+	_ "fmt"
 )
 
 type Selectable interface {
 	Measure() float64
 }
 
-func SelectRandomProportionally(a []Selectable) Selectable {
+func SelectRandomItemProportionally(a []Selectable) Selectable {
+	return SelectRandomProportionally(a, 1)[0]
+}
+
+func SelectRandomProportionally(a []Selectable, count int) []Selectable {
+	list := make([]Selectable, len(a))
+	copy(list, a)
+
 	var sum float64
 
-	measures := make([]float64, len(a))
+	measures := make([]float64, len(list))
 
-	for i, s := range a {
+	for i, s := range list {
 		measures[i] = s.Measure()
 		sum = sum + measures[i]
 	}
 	//fmt.Printf("sum measure %v \n", sum)
 
-	r := rand.Intn(int(math.Floor(sum)) + 1)
+	results := make([]Selectable, 0, count)
 
-	var n_sum float64
-	for i, m := range measures {
-		n_sum = n_sum + m
-		if n_sum >= float64(r) {
-			//fmt.Printf("found measure %v, sum %v, rand %v \n", a[i], n_sum, r)
-			return a[i]
+	if len(measures) == 0 {
+		return results
+	}
+
+	for try := 0; float64(try) < math.Min(float64(count), float64(len(measures))); try += 1 {
+
+		r := rand.Intn(int(math.Floor(sum)) + 1)
+
+		var n_sum float64
+		//fmt.Printf("measures %v list %v \n", measures, list)
+		for i, m := range measures {
+			n_sum = n_sum + m
+			if n_sum >= float64(r) {
+				//fmt.Printf("found  %v measure %v, sum %v, rand %v \n",i, list[i], n_sum, r)
+				results = append(results, list[i])
+				sum -= measures[i]
+				measures = append(measures[:i], measures[i+1:]...)
+				list = append(list[:i], list[i+1:]...)
+				break
+			}
 		}
 	}
-	return a[len(a)-1]
-
+	return results
 }
 
 //type prop int
