@@ -121,7 +121,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 
 	p.buf_input = make(chan *Chunk)
 
-	p.buf = NewBuffer(p.buf_input, p.Out, time.Duration(float64(STREAM_CHUNK_PERIOD)*1.5))
+	p.buf = NewBuffer(p.buf_input, p.Out, time.Duration(float64(STREAM_CHUNK_PERIOD)*5))
 
 	p.cmd_ch = make(chan command, 32)
 	p.quit = make(chan bool)
@@ -131,7 +131,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 	p.sink_conn = make(map[string]*Connection)
 	p.src_conn = make(map[string]*Connection)
 
-	p.sim_send = NewSemaphore(1)
+	p.sim_send = NewSemaphore(3)
 	return p
 }
 
