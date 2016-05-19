@@ -4,8 +4,8 @@ import (
 	"encoding/gob"
 	"github.com/op/go-logging"
 	"net"
-	"time"
 	"sync"
+	"time"
 )
 
 var conn_log = logging.MustGetLogger("connection")
@@ -29,14 +29,18 @@ const (
 	conn_cmd_send_ask_update   = 5
 	conn_cmd_send_update_chunk = 6
 
-	conn_cmd_get_buffer = 7
+	conn_cmd_get_buffer     = 7
 	conn_cmd_get_neighbours = 8
 
-
-	CONN_SEND_TIMEOUT     = 100 * time.Millisecond
+	CONN_SEND_TIMEOUT      = 1500 * time.Millisecond
 	CONN_UPDATE_PERIOD     = 5 * time.Second
 	CONN_ASK_UPDATE_PERIOD = 10 * time.Second
 )
+
+type confirmMessage struct {
+	msg  *ProtocolMessage
+	conf chan bool
+}
 
 type ProtocolMessage struct {
 	MsgType int
@@ -79,24 +83,24 @@ type command struct {
 }
 
 type Connection struct {
-	Peer             Peer
-	ConnId           string
-	ConnType         int
+	Peer     Peer
+	ConnId   string
+	ConnType int
 
-	PeerHost         string
-	PeerPort         int
-	PeerId           string
+	PeerHost string
+	PeerPort int
+	PeerId   string
 
 	// TODO protect buff and neighb state
-	buf_mut sync.Mutex
+	buf_mut          sync.Mutex
 	buffer_state     *BufferState
-	neighbours_mut sync.Mutex
+	neighbours_mut   sync.Mutex
 	neighbours_state *PeerNeighboursState
 	stream           net.Conn
 	log              *logging.Logger
 	cmd_ch           chan command
 	in_msg           chan ProtocolMessage
-	out_msg          chan ProtocolMessage
+	out_msg          chan confirmMessage
 	close            chan bool
 }
 
@@ -108,7 +112,7 @@ func NewConnection(id string, conn net.Conn, t int, peer Peer) *Connection {
 	c.ConnType = t
 	c.cmd_ch = make(chan command, 16)
 	c.in_msg = make(chan ProtocolMessage)
-	c.out_msg = make(chan ProtocolMessage)
+	c.out_msg = make(chan confirmMessage)
 	c.close = make(chan bool)
 
 	return c
@@ -132,17 +136,13 @@ func (c *Connection) AskUpdate() {
 }
 
 func (c *Connection) Send(chunk *Chunk) {
-	resp_chan := make(chan interface{},2)
+	resp_chan := make(chan interface{})
 	c.cmd_ch <- command{
 		cmdId: conn_cmd_send_data,
 		args:  chunk,
 		resp:  resp_chan,
 	}
-
-	//select {
-	//case <-resp_chan:
-	//case <-time.After(CONN_SEND_TIMEOUT):
-	//}
+	<-resp_chan
 }
 
 func (c *Connection) Buffer() *BufferState {
@@ -193,10 +193,10 @@ func (c *Connection) Serve() {
 	go c.serveSend()
 
 	if c.ConnType != CONN_UNDEFINED {
-		c.sheduleSendInit()
+		go c.sheduleSendInit()
 	}
 
-	c.SendUpdate()
+	go c.SendUpdate()
 	go c.scheduleSendUpdate()
 
 	for {
@@ -243,8 +243,6 @@ func (c *Connection) Serve() {
 			default:
 				c.handleUnexpected(msg)
 			}
-
-		default:
 		}
 	}
 }
@@ -270,7 +268,7 @@ func (c *Connection) scheduleSendUpdate() {
 			//conn_log.Warningf("connection %v: Handle close connection", c.ConnId)
 			return
 		case <-t.C:
-			c.SendUpdate()
+			go c.SendUpdate()
 		}
 	}
 }
@@ -289,7 +287,7 @@ func (c *Connection) scheduleSendAskUpdate() {
 			//conn_log.Warningf("connection %d: Handle close connection", c.ConnId)
 			return
 		case <-t.C:
-			c.AskUpdate()
+			go c.AskUpdate()
 		}
 	}
 }
@@ -311,7 +309,7 @@ func (c *Connection) handleCmdInit(cmd command) {
 		Payload: init,
 	}
 	c.Peer.ConnectionOpened(c)
-	c.out_msg <- msg
+	c.out_msg <- confirmMessage{msg: &msg}
 }
 
 func (c *Connection) handleCmdClose(cmd command) {
@@ -330,12 +328,21 @@ func (c *Connection) handleCmdSendData(cmd command) {
 		MsgType: PROTO_DATA,
 		Payload: data_msg,
 	}
-
-	c.out_msg <- answer_msg
-
 	c.updateChunks(chunk.Id)
 
-	close(cmd.resp)
+	go func() {
+		m := confirmMessage{
+			msg:  &answer_msg,
+			conf: make(chan bool),
+		}
+		c.out_msg <- m
+		select {
+		case <-m.conf:
+		case <-time.After(CONN_SEND_TIMEOUT):
+		}
+		close(cmd.resp)
+	}()
+
 }
 
 func (c *Connection) updateChunks(id uint64) {
@@ -376,7 +383,7 @@ func (c *Connection) handleCmdSendUpdate(cmd command) {
 		Payload: upd_msg,
 	}
 
-	c.out_msg <- answer_msg
+	c.out_msg <- confirmMessage{msg: &answer_msg}
 }
 
 func (c *Connection) handleCmdSendUpdateChunk(cmd command) {
@@ -389,7 +396,7 @@ func (c *Connection) handleCmdSendUpdateChunk(cmd command) {
 		MsgType: PROTO_UPDATE_CHUNK,
 		Payload: upd_msg,
 	}
-	c.out_msg <- answer_msg
+	c.out_msg <- confirmMessage{msg: &answer_msg}
 }
 
 func (c *Connection) handleCmdSendAskUpdate(cmd command) {
@@ -397,7 +404,7 @@ func (c *Connection) handleCmdSendAskUpdate(cmd command) {
 		MsgType: PROTO_ASK_UPDATE,
 	}
 
-	c.out_msg <- msg
+	c.out_msg <- confirmMessage{msg: &msg}
 }
 func (c *Connection) handleCmdGetBuffer(cmd command) {
 	cmd.resp <- c.buffer_state
@@ -433,7 +440,7 @@ func (c *Connection) handleMsgInit(msg ProtocolMessage) {
 		c.Peer.ConnectionOpened(c)
 	default:
 		//conn_log.Errorf("Unexpected connection type %v", init)
-		c.Close()
+		go c.Close()
 	}
 }
 
@@ -453,7 +460,7 @@ func (c *Connection) handleMsgAskUpdate(msg ProtocolMessage) {
 		return
 	}
 
-	c.SendUpdate()
+	go c.SendUpdate()
 }
 
 func (c *Connection) handleMsgUpdate(msg ProtocolMessage) {
@@ -524,9 +531,14 @@ func (c *Connection) serveSend() {
 			return
 		default:
 		}
-		sendMessage := <-c.out_msg
+
+		conf_msg := <-c.out_msg
+		sendMessage := *conf_msg.msg
 		//conn_log.Debugf("connection %d: send msg %//v", c.ConnId, sendMessage)
 		err := encoder.Encode(sendMessage)
+		if conf_msg.conf != nil {
+			close(conf_msg.conf)
+		}
 		if err != nil {
 			conn_log.Errorf("connection %d: output encode err %v", c.ConnId, err)
 			continue

@@ -14,12 +14,11 @@ type Chunk struct {
 }
 
 const (
-	SB_MAX_SIZE            = 50
-	SB_NEW_MAX_SIZE        = 40
-	SB_NEXT_CHUNK_DEADLINE = 5 * STREAM_CHUNK_PERIOD
-	sb_cmd_state           = 1
-	sb_cmd_latest_useful   = 2
-	sb_cmd_latest          = 3
+	SB_MAX_SIZE          = 50
+	SB_NEW_MAX_SIZE      = 40
+	sb_cmd_state         = 1
+	sb_cmd_latest_useful = 2
+	sb_cmd_latest        = 3
 )
 
 type BufferState struct {
@@ -28,19 +27,21 @@ type BufferState struct {
 }
 
 type Buffer struct {
-	buf    []*Chunk
-	lastId uint64
-	cmd_ch chan command
-	BufOut chan<- *Chunk
-	BufIn  <-chan *Chunk
+	buf            []*Chunk
+	lastId         uint64
+	cmd_ch         chan command
+	BufOut         chan<- *Chunk
+	BufIn          <-chan *Chunk
+	chunk_deadline time.Duration
 }
 
-func NewBuffer(in <-chan *Chunk, out chan<- *Chunk) *Buffer {
+func NewBuffer(in <-chan *Chunk, out chan<- *Chunk, d time.Duration) *Buffer {
 	sb := new(Buffer)
 	sb.buf = make([]*Chunk, 0, SB_MAX_SIZE)
 	sb.cmd_ch = make(chan command)
 	sb.BufOut = out
 	sb.BufIn = in
+	sb.chunk_deadline = d
 
 	go sb.Serve()
 
@@ -126,7 +127,7 @@ func (sb *Buffer) LatestUseful(chunks []uint64) *Chunk {
 	resp_ch := make(chan interface{})
 	sb.cmd_ch <- command{
 		cmdId: sb_cmd_latest_useful,
-		args: chunks,
+		args:  chunks,
 		resp:  resp_ch,
 	}
 	r_i := <-resp_ch
@@ -148,7 +149,6 @@ func (sb *Buffer) getLatest() *Chunk {
 	}
 	return sb.buf[len(sb.buf)-1]
 }
-
 
 func (sb *Buffer) getLatestUseful(chunks []uint64) *Chunk {
 	if len(chunks) == 0 && len(sb.buf) != 0 {
@@ -197,7 +197,7 @@ func (sb *Buffer) sendAny() bool {
 }
 
 func (sb *Buffer) Serve() {
-	deadline_ch := time.After(SB_NEXT_CHUNK_DEADLINE)
+	deadline_ch := time.After(sb.chunk_deadline)
 	for {
 		select {
 		case cmd := <-sb.cmd_ch:
@@ -222,10 +222,10 @@ func (sb *Buffer) Serve() {
 			}
 			sb.insert(c)
 			if sb.sendAny() {
-				deadline_ch = time.After(SB_NEXT_CHUNK_DEADLINE)
+				deadline_ch = time.After(sb.chunk_deadline)
 			}
 		case <-deadline_ch:
-			deadline_ch = time.After(SB_NEXT_CHUNK_DEADLINE)
+			deadline_ch = time.After(sb.chunk_deadline)
 			nextId, pos, err := sb.next_id(sb.lastId)
 			if err != nil {
 				buf_log.Infof("BUF: Next chunk for %d not found (%v) on deadline", sb.lastId, err)
@@ -236,7 +236,7 @@ func (sb *Buffer) Serve() {
 			buf_log.Debugf("BUF: Chunk %d sent by deadline", nextId)
 			// trigger send rest ready chunks
 			if sb.sendAny() {
-				deadline_ch = time.After(SB_NEXT_CHUNK_DEADLINE)
+				deadline_ch = time.After(sb.chunk_deadline)
 			}
 		}
 	}

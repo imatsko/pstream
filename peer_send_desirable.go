@@ -3,14 +3,14 @@ package pstream
 import (
 	"math"
 	_ "sort"
+	_ "time"
 )
-
 
 //========================================================
 // send most useful to desired
 //=======================================================
 
-func select_with_latest_useful(a []sink_rate) []sink_rate{
+func select_with_latest_useful(a []sink_rate) []sink_rate {
 	var max_id uint64
 
 	for _, r := range a {
@@ -47,7 +47,7 @@ type sink_rate struct {
 	d             float64
 }
 
-func (r sink_rate)Measure() float64  {
+func (r sink_rate) Measure() float64 {
 	return r.d
 }
 
@@ -55,7 +55,7 @@ func select_random_proportionally(sinks []sink_rate) sink_rate {
 	latest_useful := select_with_latest_useful(sinks)
 	selectable := make([]Selectable, len(latest_useful))
 
-	for i:=0; i< len(latest_useful); i+=1 {
+	for i := 0; i < len(latest_useful); i += 1 {
 		selectable[i] = latest_useful[i]
 	}
 
@@ -68,6 +68,8 @@ func (p *PeerImpl) handleSendDesired() {
 		p.log.Printf("No clients")
 		return
 	}
+	p.sim_send.Acquire(1)
+	defer p.sim_send.Release(1)
 
 	//latestChunk := p.buf.Latest()
 

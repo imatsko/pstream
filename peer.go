@@ -5,10 +5,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/op/go-logging"
+	"math"
 	"net"
 	"sync"
 	"time"
-	"math"
 )
 
 const STREAM_CHUNK_PERIOD = time.Millisecond * 100
@@ -85,7 +85,7 @@ type PeerImpl struct {
 	Out chan *Chunk
 
 	send_rate float64
-	rate_ch    chan bool
+	rate_ch   chan bool
 
 	addr_mut sync.Mutex
 	port     int
@@ -99,6 +99,8 @@ type PeerImpl struct {
 
 	sink_conn map[string]*Connection
 	src_conn  map[string]*Connection
+
+	sim_send *Semaphore
 }
 
 func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
@@ -112,11 +114,12 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 	p.listenAddr = listen
 	p.send_rate = rate
 
-	p.In = make(chan *Chunk)
+	p.In = make(chan *Chunk, 16)
 	p.Out = make(chan *Chunk, 32)
 
 	p.buf_input = make(chan *Chunk, 32)
-	p.buf = NewBuffer(p.buf_input, p.Out)
+
+	p.buf = NewBuffer(p.buf_input, p.Out, STREAM_CHUNK_PERIOD*5)
 
 	p.cmd_ch = make(chan command, 32)
 	p.quit = make(chan bool)
@@ -126,6 +129,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 	p.sink_conn = make(map[string]*Connection)
 	p.src_conn = make(map[string]*Connection)
 
+	p.sim_send = NewSemaphore(3)
 	return p
 }
 
@@ -174,7 +178,7 @@ func (p *PeerImpl) ServeReconfigure(period time.Duration) {
 
 func (p *PeerImpl) ServeSendRate(rate float64) {
 	p.log.Printf("start rate %v", rate)
-	period := time.Duration(float64(STREAM_CHUNK_PERIOD)/rate)
+	period := time.Duration(float64(STREAM_CHUNK_PERIOD) / rate)
 
 	ticker := time.NewTicker(period).C
 	p.rate_ch = make(chan bool)
@@ -192,9 +196,9 @@ func (p *PeerImpl) ServeSendRate(rate float64) {
 
 func (p *PeerImpl) ServeSendRateSleep(rate float64) {
 	p.log.Printf("start rate %v", rate)
-	period := time.Duration(float64(STREAM_CHUNK_PERIOD)/rate)
+	period := time.Duration(float64(STREAM_CHUNK_PERIOD) / rate)
 
-	p.rate_ch = make(chan bool,32)
+	p.rate_ch = make(chan bool, 32)
 
 	for {
 		select {
@@ -223,11 +227,11 @@ func (p *PeerImpl) ServeInfiniteSendRate() {
 
 func (p *PeerImpl) ServeSendRateBuf(rate float64) {
 	p.log.Printf("start rate %v", rate)
-	period := time.Duration(float64(STREAM_CHUNK_PERIOD)/rate)
+	period := time.Duration(float64(STREAM_CHUNK_PERIOD) / rate)
 	p.log.Printf("period %v", period)
 
 	//p.rate_ch = make(chan bool)
-	p.rate_ch = make(chan bool,int(math.Ceil(rate)))
+	p.rate_ch = make(chan bool, int(math.Ceil(rate)))
 	var prev float64
 	var count int64
 	for {
@@ -253,14 +257,14 @@ func (p *PeerImpl) ServeSendRate2(rate float64) {
 	period := STREAM_CHUNK_PERIOD
 
 	ticker := time.NewTicker(period).C
-	p.rate_ch = make(chan bool,int(math.Ceil(rate)))
+	p.rate_ch = make(chan bool, int(math.Ceil(rate)))
 
 	for {
 		select {
 		case <-p.quit:
 			return
 		case <-ticker:
-			for i:=0; float64(i) < rate; i += 1 {
+			for i := 0; float64(i) < rate; i += 1 {
 				p.rate_ch <- true
 			}
 		default:
@@ -273,11 +277,10 @@ func (p *PeerImpl) ServeSendRateBuf2(rate float64) {
 	period := STREAM_CHUNK_PERIOD
 	p.log.Printf("period %v", period)
 
-
 	ticker := time.NewTicker(period).C
 
 	//p.rate_ch = make(chan bool)
-	p.rate_ch = make(chan bool,int(math.Ceil(rate)))
+	p.rate_ch = make(chan bool, int(math.Ceil(rate)))
 	var prev float64
 	var count int64
 	for {
@@ -313,7 +316,13 @@ func (p *PeerImpl) Serve() {
 		go p.ServeConnections()
 	}
 
-	go p.ServeReconfigure(PEER_NETWORK_RECONFIGURE_PERIOD)
+	reconfigure_ticker := time.NewTicker(PEER_NETWORK_RECONFIGURE_PERIOD).C
+	go func() {
+		<-time.After(PEER_NETWORK_RECONFIGURE_PERIOD_INIT)
+		p.ReconfigureNetwork()
+	}()
+
+	//go p.ServeReconfigure(PEER_NETWORK_RECONFIGURE_PERIOD)
 
 	for {
 		select {
@@ -343,8 +352,9 @@ func (p *PeerImpl) Serve() {
 				p.handleCmdUnexpected(cmd)
 			}
 		case <-p.rate_ch:
-			//p.log.Printf("Try send")
 			p.handleSend()
+		case <-reconfigure_ticker:
+			p.handleCmdReconfigureNetwork(command{})
 		}
 	}
 }
@@ -669,4 +679,3 @@ func (p *PeerImpl) Exit() {
 		cmdId: peer_cmd_exit,
 	}
 }
-

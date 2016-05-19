@@ -36,7 +36,6 @@ func SelectRandomProportionally(a []Selectable) Selectable {
 
 }
 
-
 //type prop int
 //func (i prop) Measure() float64 {
 //	//return math.Sqrt(float64(i))
@@ -68,3 +67,28 @@ func SelectRandomProportionally(a []Selectable) Selectable {
 //fmt.Println(res_counter)
 //
 //}
+
+type Semaphore struct {
+	c   chan interface{}
+	len int
+}
+
+func NewSemaphore(l int) *Semaphore {
+	s := new(Semaphore)
+	s.c = make(chan interface{}, l)
+	s.len = l
+
+	return s
+}
+
+func (s *Semaphore) Acquire(n int) {
+	for i := 0; i < n; i += 1 {
+		s.c <- nil
+	}
+}
+
+func (s *Semaphore) Release(n int) {
+	for i := 0; i < n; i += 1 {
+		<-s.c
+	}
+}
