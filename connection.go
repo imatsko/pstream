@@ -32,6 +32,7 @@ const (
 
 	conn_cmd_get_buffer     = 7
 	conn_cmd_get_neighbours = 8
+	conn_cmd_flush_used = 9
 
 	CONN_SEND_TIMEOUT     = 2 * STREAM_CHUNK_PERIOD
 	CONN_SEND_MSG_TIMEOUT = 1000 * time.Millisecond
@@ -94,6 +95,8 @@ type Connection struct {
 	PeerPort int
 	PeerId   string
 
+	Used bool
+
 	// TODO protect buff and neighb state
 	buf_mut          sync.Mutex
 	buffer_state     *BufferState
@@ -137,6 +140,11 @@ func (c *Connection) SendUpdateChunk(chunk_id uint64) {
 func (c *Connection) AskUpdate() {
 	c.cmd_ch <- command{cmdId: conn_cmd_send_ask_update}
 }
+
+func (c *Connection) FlushUsed() {
+	c.cmd_ch <- command{cmdId: conn_cmd_flush_used}
+}
+
 
 func (c *Connection) Send(chunk *Chunk) {
 	resp_chan := make(chan interface{})
@@ -188,6 +196,7 @@ func (c *Connection) Neighbours() *PeerNeighboursState {
 	new_state := new(PeerNeighboursState)
 	new_state.Sinks = c.neighbours_state.Sinks[:]
 	new_state.Sources = c.neighbours_state.Sources[:]
+	new_state.Connectivity = c.neighbours_state.Connectivity
 	return new_state
 }
 
@@ -222,6 +231,8 @@ func (c *Connection) Serve() {
 				c.handleCmdSendAskUpdate(cmd)
 			case conn_cmd_send_data:
 				c.handleCmdSendData(cmd)
+			case conn_cmd_flush_used:
+				c.handleCmdFlushUsed(cmd)
 			case conn_cmd_get_buffer:
 				c.handleCmdGetBuffer(cmd)
 			case conn_cmd_get_neighbours:
@@ -323,6 +334,7 @@ func (c *Connection) handleCmdClose(cmd command) {
 }
 
 func (c *Connection) handleCmdSendData(cmd command) {
+	c.Used = true
 	chunk := cmd.args.(*Chunk)
 	data_msg := DataMessage{
 		Chunk: *chunk,
@@ -410,6 +422,12 @@ func (c *Connection) handleCmdSendAskUpdate(cmd command) {
 
 	c.out_msg <- confirmMessage{msg: &msg}
 }
+
+func (c *Connection) handleCmdFlushUsed(cmd command) {
+	c.Used = false
+	return
+}
+
 func (c *Connection) handleCmdGetBuffer(cmd command) {
 	cmd.resp <- c.buffer_state
 	return

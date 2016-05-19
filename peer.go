@@ -60,6 +60,7 @@ type PeerStat struct {
 type PeerNeighboursState struct {
 	Sinks   []PeerStat
 	Sources []PeerStat
+	Connectivity int
 }
 
 type Peer interface {
@@ -370,6 +371,9 @@ func (p *PeerImpl) handleCmdReconfigureNetwork(cmd command) {
 	p.log.Printf("Do reconfigure %v", cmd)
 
 	//p.reconfigureNetworkFixedN()
+	for _, conn := range p.sink_conn {
+		conn.FlushUsed()
+	}
 }
 
 func (p *PeerImpl) handleCmdBootstrapNetwork(cmd command) {
@@ -417,6 +421,7 @@ func (p *PeerImpl) collectNetworkStatus() PeerNeighboursState {
 	return PeerNeighboursState{
 		Sources: sources,
 		Sinks:   sinks,
+		Connectivity: len(sinks),
 	}
 }
 
