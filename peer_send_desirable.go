@@ -117,8 +117,8 @@ func (p *PeerImpl) handleSendDesired() {
 
 	go func() {
 		p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn.ConnId)
-		conn.Send(chunk)
-		p.log.Printf("Chunk %v to sink %v delivered", chunk.Id, conn.ConnId)
+		r := conn.Send(chunk)
+		p.log.Printf("Chunk %v to sink %v delivered %v", chunk.Id, conn.ConnId, r)
 		p.sim_send.Release(1)
 	}()
 }

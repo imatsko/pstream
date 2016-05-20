@@ -35,7 +35,7 @@ const (
 	conn_cmd_flush_used = 9
 
 	CONN_SEND_TIMEOUT     = 2 * DEFAULT_STREAM_CHUNK_PERIOD
-	CONN_SEND_MSG_TIMEOUT = 500 * time.Millisecond
+	CONN_SEND_MSG_TIMEOUT = 1000 * time.Millisecond
 	CONN_SEND_DATA_TIMEOUT = 200 * time.Millisecond
 
 
@@ -110,6 +110,7 @@ type Connection struct {
 	in_msg           chan ProtocolMessage
 	out_msg          chan confirmMessage
 	close            chan bool
+	data_send_lock   chan bool
 }
 
 func NewConnection(id string, conn net.Conn, t int, peer Peer) *Connection {
@@ -118,10 +119,11 @@ func NewConnection(id string, conn net.Conn, t int, peer Peer) *Connection {
 	c.stream = conn
 	c.Peer = peer
 	c.ConnType = t
-	c.cmd_ch = make(chan command)
+	c.cmd_ch = make(chan command,2)
 	c.in_msg = make(chan ProtocolMessage)
 	c.out_msg = make(chan confirmMessage)
 	c.close = make(chan bool)
+	c.data_send_lock = make(chan bool, 1)
 
 	return c
 }
@@ -148,7 +150,13 @@ func (c *Connection) FlushUsed() {
 }
 
 
-func (c *Connection) Send(chunk *Chunk) {
+func (c *Connection) Send(chunk *Chunk) bool {
+	select {
+	case c.data_send_lock <- true:
+	default:
+		return false
+	}
+
 	resp_chan := make(chan interface{})
 	c.cmd_ch <- command{
 		cmdId: conn_cmd_send_data,
@@ -157,7 +165,11 @@ func (c *Connection) Send(chunk *Chunk) {
 	}
 	select {
 	case <-resp_chan:
+		<- c.data_send_lock
+		return true
 	case <-time.After(CONN_SEND_DATA_TIMEOUT):
+		<- c.data_send_lock
+		return false
 	}
 }
 
