@@ -3,11 +3,11 @@ package pstream
 import (
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"github.com/op/go-logging"
 	"net"
 	"sync"
 	"time"
-	"fmt"
 )
 
 var conn_log = logging.MustGetLogger("connection")
@@ -33,7 +33,7 @@ const (
 
 	conn_cmd_get_buffer     = 7
 	conn_cmd_get_neighbours = 8
-	conn_cmd_flush_used = 9
+	conn_cmd_flush_used     = 9
 
 	CONN_SEND_MSG_TIMEOUT = 1000 * time.Millisecond
 
@@ -87,7 +87,7 @@ type command struct {
 }
 
 func (c Connection) String() string {
-	return fmt.Sprintf("(CONN %v %v)", c.ConnId, c.PeerId)
+	return fmt.Sprintf("(CONN %v %v used=%v host=%v port=%v)", c.ConnId, c.PeerId, c.Used, c.PeerHost, c.PeerPort)
 }
 
 type Connection struct {
@@ -121,7 +121,7 @@ func NewConnection(id string, conn net.Conn, t int, peer Peer) *Connection {
 	c.stream = conn
 	c.Peer = peer
 	c.ConnType = t
-	c.cmd_ch = make(chan command,2)
+	c.cmd_ch = make(chan command, 2)
 	c.in_msg = make(chan ProtocolMessage)
 	c.out_msg = make(chan confirmMessage)
 	c.close = make(chan bool)
@@ -161,7 +161,7 @@ func (c *Connection) LockSend() bool {
 }
 
 func (c *Connection) UnlockSend() {
-	<- c.data_send_lock
+	<-c.data_send_lock
 }
 
 func (c *Connection) Send(chunk *Chunk) bool {
@@ -176,7 +176,7 @@ func (c *Connection) Send(chunk *Chunk) bool {
 	select {
 	case r := <-resp_chan:
 		//c.updateChunks(chunk.Id)
-		res  = r.(bool)
+		res = r.(bool)
 	}
 	if res {
 		c.updateChunks(chunk.Id)
@@ -352,14 +352,13 @@ func (c *Connection) handleCmdInit(cmd command) {
 		MsgType: PROTO_INIT,
 		Payload: init,
 	}
-	c.Peer.ConnectionOpened(c)
 	c.out_msg <- confirmMessage{msg: &msg}
 }
 
 func (c *Connection) handleCmdClose(cmd command) {
 	//conn_log.Warningf("connection %d: Got close cmd", c.ConnId)
 	c.Peer.ConnectionClosed(c)
-	_, not_closed := <- c.close
+	_, not_closed := <-c.close
 	if not_closed {
 		close(c.close)
 	}
@@ -380,7 +379,7 @@ func (c *Connection) handleCmdSendData(cmd command) {
 	go func() {
 		m := confirmMessage{
 			msg:  &answer_msg,
-			conf: make(chan bool,1),
+			conf: make(chan bool, 1),
 		}
 		c.out_msg <- m
 		conn_log.Warningf("%v: data send to sender", c)
@@ -475,26 +474,34 @@ func (c *Connection) handleCmdUnexpected(cmd command) {
 }
 
 func (c *Connection) handleMsgInit(msg ProtocolMessage) {
+	conn_log.Warningf("%v: Got init %v", c, msg)
+
 	init := msg.Payload.(InitMessage)
 	c.PeerId = init.SelfId
 	c.PeerHost = c.stream.RemoteAddr().(*net.TCPAddr).IP.String()
 	c.PeerPort = init.Port
 
-	if c.ConnType != CONN_UNDEFINED {
-		c.Peer.ConnectionOpened(c)
-		return
-	}
 
-	switch init.ConnType {
-	case CONN_RECV:
-		c.ConnType = CONN_SEND
+	if c.ConnType == CONN_UNDEFINED {
+	// passive
+		conn_log.Warningf("%v: Got init passive", c)
+		switch init.ConnType {
+		case CONN_RECV:
+			c.ConnType = CONN_SEND
+			c.Peer.ConnectionOpened(c)
+			go c.sheduleSendInit()
+		case CONN_SEND:
+			c.ConnType = CONN_RECV
+			c.Peer.ConnectionOpened(c)
+			go c.sheduleSendInit()
+		default:
+			//conn_log.Errorf("Unexpected connection type %v", init)
+			go c.Close()
+		}
+	} else {
+		conn_log.Warningf("%v: Got init active", c)
+		//active
 		c.Peer.ConnectionOpened(c)
-	case CONN_SEND:
-		c.ConnType = CONN_RECV
-		c.Peer.ConnectionOpened(c)
-	default:
-		//conn_log.Errorf("Unexpected connection type %v", init)
-		go c.Close()
 	}
 }
 
@@ -549,6 +556,7 @@ func (c *Connection) handleUnexpected(msg ProtocolMessage) {
 }
 
 func (c *Connection) serveRecv() {
+	// TODO read timeout
 	decoder := gob.NewDecoder(c.stream)
 	for {
 		select {

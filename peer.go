@@ -138,7 +138,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 }
 
 func (p *PeerImpl) generateRandomId() {
-	buffer := make([]byte, 20)
+	buffer := make([]byte, 6)
 	_, err := rand_c.Read(buffer)
 	if err != nil {
 		panic(err)
@@ -350,7 +350,10 @@ func (p *PeerImpl) handleCmdNotifyUpdate(cmd command) {
 func (p *PeerImpl) handleCmdReconfigureNetwork(cmd command) {
 	p.log.Printf("Do reconfigure %v", cmd)
 
-	//p.reconfigureNetworkFixedN()
+	p.reconfigureNetworkFixedN()
+
+
+
 	go func() {
 		for _, conn := range p.sink_conn {
 			conn.FlushUsed()
@@ -504,6 +507,15 @@ func (p *PeerImpl) handleCmdClose(cmd command) {
 	}
 }
 
+func (p *PeerImpl) samePeerExists(collection map[string]*Connection, peerId string) bool {
+	for _, c := range collection {
+		if c.PeerId == peerId {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *PeerImpl) handleCmdOpen(cmd command) {
 	c := cmd.args.(*Connection)
 	p.log.Printf("Got new connection %v", c)
@@ -519,8 +531,13 @@ func (p *PeerImpl) handleCmdOpen(cmd command) {
 	}
 
 	if _, ok := storage[c.ConnId]; !ok {
-		p.log.Printf("Add connection %v", c)
-		storage[c.ConnId] = c
+		if !p.samePeerExists(storage, c.PeerId) {
+			p.log.Printf("Add connection %v", c)
+			storage[c.ConnId] = c
+		} else {
+			p.log.Printf("connection %v with same peeralready exists, close new", c)
+			c.Close()
+		}
 	} else {
 		p.log.Printf("connection %v already exists, close new", c)
 		c.Close()
