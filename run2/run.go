@@ -106,7 +106,7 @@ func start_source() {
 				buf_data[pos] = byte(i)
 			}
 
-			c := pstream.Chunk{uint64(i), &buf_data}
+			c := pstream.Chunk{uint64(i), period, &buf_data}
 			//c := pstream.Chunk{uint64(i), i}
 			main_log.Debugf("Sending %v", c.Id)
 			in <- &c

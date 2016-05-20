@@ -34,8 +34,10 @@ const (
 	conn_cmd_get_neighbours = 8
 	conn_cmd_flush_used = 9
 
-	CONN_SEND_TIMEOUT     = 2 * STREAM_CHUNK_PERIOD
-	CONN_SEND_MSG_TIMEOUT = 1000 * time.Millisecond
+	CONN_SEND_TIMEOUT     = 2 * DEFAULT_STREAM_CHUNK_PERIOD
+	CONN_SEND_MSG_TIMEOUT = 500 * time.Millisecond
+	CONN_SEND_DATA_TIMEOUT = 200 * time.Millisecond
+
 
 	CONN_UPDATE_PERIOD     = 5 * time.Second
 	CONN_ASK_UPDATE_PERIOD = 10 * time.Second
@@ -153,7 +155,10 @@ func (c *Connection) Send(chunk *Chunk) {
 		args:  chunk,
 		resp:  resp_chan,
 	}
-	<-resp_chan
+	select {
+	case <-resp_chan:
+	case <-time.After(CONN_SEND_DATA_TIMEOUT):
+	}
 }
 
 func (c *Connection) Buffer() *BufferState {
@@ -354,7 +359,7 @@ func (c *Connection) handleCmdSendData(cmd command) {
 		c.out_msg <- m
 		select {
 		case <-m.conf:
-		case <-time.After(CONN_SEND_TIMEOUT):
+		case <-time.After(c.Peer.Buf().Period()):
 		}
 		close(cmd.resp)
 	}()

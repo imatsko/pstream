@@ -105,7 +105,7 @@ func (p *PeerImpl) handleSendDesired() {
 		sinks = append(sinks, sink_rate{id: id, latest_useful: latest_useful, d: des})
 	}
 	if len(sinks) == 0 {
-		p.log.Printf("Nothing to send")
+		//p.log.Printf("Nothing to send")
 		p.sim_send.Release(1)
 		return
 	}

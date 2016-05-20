@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const STREAM_CHUNK_PERIOD = time.Millisecond * 100
+const DEFAULT_STREAM_CHUNK_PERIOD = time.Millisecond * 100
 
 const (
 	PEER_MIN_SOURCES = 2
@@ -69,6 +69,7 @@ type Peer interface {
 	Port() int
 	Neighbours() PeerNeighboursState
 	Buffer() BufferState
+	Buf() *Buffer
 	InChunks() chan<- *Chunk
 	ConnectionClosed(c *Connection)
 	ConnectionOpened(c *Connection)
@@ -122,7 +123,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 
 	p.buf_input = make(chan *Chunk)
 
-	p.buf = NewBuffer(p.buf_input, p.Out, time.Duration(float64(STREAM_CHUNK_PERIOD)*5))
+	p.buf = NewBuffer(p.buf_input, p.Out, 5)
 
 	p.cmd_ch = make(chan command, 32)
 	p.quit = make(chan bool)
@@ -191,29 +192,8 @@ func (p *PeerImpl) ServeInfiniteSendRate() {
 	}
 }
 
-func (p *PeerImpl) ServeSendRate(rate float64) {
-	p.log.Printf("start rate %v", rate)
-	period := time.Duration(float64(STREAM_CHUNK_PERIOD) / rate)
-
-	ticker := time.NewTicker(period).C
-	p.rate_ch = make(chan bool)
-
-	for {
-		select {
-		case <-p.quit:
-			return
-		case <-ticker:
-			p.rate_ch <- true
-		}
-	}
-}
-
 func (p *PeerImpl) ServeSendRate2(rate float64) {
 	p.log.Printf("start rate %v", rate)
-	period := STREAM_CHUNK_PERIOD
-	p.log.Printf("period %v", period)
-
-	ticker := time.NewTicker(period).C
 
 	//p.rate_ch = make(chan bool)
 	p.rate_ch = make(chan bool, int(math.Ceil(rate)))
@@ -231,7 +211,7 @@ func (p *PeerImpl) ServeSendRate2(rate float64) {
 			} else {
 				//p.log.Printf("sleep %v %v", count, prev)
 				prev += rate
-				<-ticker
+				<-time.After(p.buf.Period())
 			}
 		}
 	}
@@ -371,9 +351,11 @@ func (p *PeerImpl) handleCmdReconfigureNetwork(cmd command) {
 	p.log.Printf("Do reconfigure %v", cmd)
 
 	//p.reconfigureNetworkFixedN()
-	for _, conn := range p.sink_conn {
-		conn.FlushUsed()
-	}
+	go func() {
+		for _, conn := range p.sink_conn {
+			conn.FlushUsed()
+		}
+	}()
 }
 
 func (p *PeerImpl) handleCmdBootstrapNetwork(cmd command) {
@@ -576,6 +558,10 @@ func (p *PeerImpl) Neighbours() PeerNeighboursState {
 
 func (p *PeerImpl) Buffer() BufferState {
 	return p.buf.State()
+}
+
+func (p *PeerImpl) Buf() *Buffer {
+	return p.buf
 }
 
 func (p *PeerImpl) InChunks() chan<- *Chunk {

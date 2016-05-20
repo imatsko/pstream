@@ -10,11 +10,13 @@ var buf_log = logging.MustGetLogger("StreamBuffer")
 
 type Chunk struct {
 	Id   uint64
+	time.Duration
 	Data interface{}
 }
 
 const (
 	SB_MAX_SIZE          = 50
+	SB_PERIOD_SIZE          = 5
 	SB_NEW_MAX_SIZE      = 40
 	sb_cmd_state         = 1
 	sb_cmd_latest_useful = 2
@@ -32,20 +34,38 @@ type Buffer struct {
 	cmd_ch         chan command
 	BufOut         chan<- *Chunk
 	BufIn          <-chan *Chunk
-	chunk_deadline time.Duration
+	period time.Duration
+	period_buf []time.Duration
+	deadline_mult float64
 }
 
-func NewBuffer(in <-chan *Chunk, out chan<- *Chunk, d time.Duration) *Buffer {
+func NewBuffer(in <-chan *Chunk, out chan<- *Chunk, deadline_mult float64) *Buffer {
 	sb := new(Buffer)
 	sb.buf = make([]*Chunk, 0, SB_MAX_SIZE)
+	sb.period_buf = make([]time.Duration, 0, 3)
+	sb.period = DEFAULT_STREAM_CHUNK_PERIOD
 	sb.cmd_ch = make(chan command)
 	sb.BufOut = out
 	sb.BufIn = in
-	sb.chunk_deadline = d
+	sb.deadline_mult = deadline_mult
 
 	go sb.Serve()
 
 	return sb
+}
+
+func (sb *Buffer) update_period(d time.Duration) {
+	if len(sb.period_buf) < SB_PERIOD_SIZE {
+		sb.period_buf = append(sb.period_buf, d)
+	} else {
+		sb.period_buf = append(sb.period_buf[1:], d)
+	}
+
+	var sum time.Duration
+	for _, d := range sb.period_buf {
+		sum += d
+	}
+	sb.period = time.Duration(uint64(sum)/uint64(len(sb.period_buf)))
 }
 
 func (sb *Buffer) insert(c *Chunk) bool {
@@ -133,6 +153,14 @@ func (sb *Buffer) LatestUseful(chunks []uint64) *Chunk {
 	r_i := <-resp_ch
 	return r_i.(*Chunk)
 }
+func (sb *Buffer) Period() time.Duration {
+	return sb.period
+}
+
+func (sb *Buffer) deadline() time.Duration {
+	return time.Duration(float64(sb.period)*sb.deadline_mult)
+}
+
 func (sb *Buffer) Latest() *Chunk {
 	resp_ch := make(chan interface{})
 	sb.cmd_ch <- command{
@@ -197,7 +225,8 @@ func (sb *Buffer) sendAny() bool {
 }
 
 func (sb *Buffer) Serve() {
-	deadline_ch := time.After(sb.chunk_deadline)
+
+	deadline_ch := time.After(sb.deadline())
 	for {
 		select {
 		case cmd := <-sb.cmd_ch:
@@ -221,11 +250,12 @@ func (sb *Buffer) Serve() {
 				continue
 			}
 			sb.insert(c)
+
 			if sb.sendAny() {
-				deadline_ch = time.After(sb.chunk_deadline)
+				deadline_ch = time.After(sb.deadline())
 			}
 		case <-deadline_ch:
-			deadline_ch = time.After(sb.chunk_deadline)
+			deadline_ch = time.After(sb.deadline())
 			nextId, pos, err := sb.next_id(sb.lastId)
 			if err != nil {
 				buf_log.Infof("BUF: Next chunk for %d not found (%v) on deadline", sb.lastId, err)
@@ -236,7 +266,7 @@ func (sb *Buffer) Serve() {
 			buf_log.Debugf("BUF: Chunk %d sent by deadline", nextId)
 			// trigger send rest ready chunks
 			if sb.sendAny() {
-				deadline_ch = time.After(sb.chunk_deadline)
+				deadline_ch = time.After(sb.deadline())
 			}
 		}
 	}
