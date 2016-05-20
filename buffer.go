@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/op/go-logging"
 	"time"
+	"fmt"
 )
 
 var buf_log = logging.MustGetLogger("StreamBuffer")
@@ -13,6 +14,11 @@ type Chunk struct {
 	time.Duration
 	Data interface{}
 }
+
+func (c *Chunk) String() string {
+	return fmt.Sprintf("Chunk(id=%v,d=%v)", c.Id, c.Duration)
+}
+
 
 const (
 	SB_MAX_SIZE          = 50
@@ -29,6 +35,7 @@ type BufferState struct {
 }
 
 type Buffer struct {
+	id  string
 	buf            []*Chunk
 	lastId         uint64
 	cmd_ch         chan command
@@ -39,8 +46,9 @@ type Buffer struct {
 	deadline_mult float64
 }
 
-func NewBuffer(in <-chan *Chunk, out chan<- *Chunk, deadline_mult float64) *Buffer {
+func NewBuffer(id string, in <-chan *Chunk, out chan<- *Chunk, deadline_mult float64) *Buffer {
 	sb := new(Buffer)
+	sb.id = id
 	sb.buf = make([]*Chunk, 0, SB_MAX_SIZE)
 	sb.period_buf = make([]time.Duration, 0, 3)
 	sb.period = DEFAULT_STREAM_CHUNK_PERIOD
@@ -209,17 +217,17 @@ func (sb *Buffer) sendAny() bool {
 
 		nextId, pos, err := sb.next_id(sb.lastId)
 		if err != nil {
-			buf_log.Infof("BUF: Next chunk for %d not found (%v)", sb.lastId, err)
+			buf_log.Infof("BUF (%v): Next chunk for %d not found (%v)", sb.id, sb.lastId, err)
 			break
 		}
 		if nextId != sb.lastId+1 {
-			buf_log.Infof("BUF: Next chunk for %d is %d and not following, wait", sb.lastId, nextId)
+			buf_log.Infof("BUF (%v): Next chunk for %d is %d and not following, wait", sb.id, sb.lastId, nextId)
 			break
 		}
 		sb.BufOut <- sb.buf[pos]
 		sb.lastId = nextId
 		sent = true
-		buf_log.Debugf("BUF: Chunk %d sent", nextId)
+		buf_log.Debugf("BUF (%v): Chunk %d sent", sb.id, nextId)
 	}
 	return sent
 }
@@ -229,27 +237,14 @@ func (sb *Buffer) Serve() {
 	deadline_ch := time.After(sb.deadline())
 	for {
 		select {
-		case cmd := <-sb.cmd_ch:
-			switch cmd.cmdId {
-			case sb_cmd_state:
-				buf_log.Debugf("BUF: Got collect state %#v", cmd)
-				cmd.resp <- sb.collectState()
-			case sb_cmd_latest_useful:
-				//buf_log.Debugf("BUF: Got latest useful")
-				cmd.resp <- sb.getLatestUseful(cmd.args.([]uint64))
-			case sb_cmd_latest:
-				//buf_log.Debugf("BUF: Got latest")
-				cmd.resp <- sb.getLatest()
-			default:
-				buf_log.Debugf("BUF: Got undefined command %#v", cmd)
-			}
 		case c := <-sb.BufIn:
-			buf_log.Debugf("BUF: Got chunk %d", c.Id)
+			buf_log.Debugf("BUF (%v): Got chunk %d", sb.id, c.Id)
 			if c.Id <= sb.lastId {
-				buf_log.Infof("BUF: Chunk %d already played, skip", c.Id)
+				buf_log.Infof("BUF (%v): Chunk %d already played, skip", sb.id, c.Id)
 				continue
 			}
 			sb.insert(c)
+			sb.update_period(c.Duration)
 
 			if sb.sendAny() {
 				deadline_ch = time.After(sb.deadline())
@@ -258,15 +253,30 @@ func (sb *Buffer) Serve() {
 			deadline_ch = time.After(sb.deadline())
 			nextId, pos, err := sb.next_id(sb.lastId)
 			if err != nil {
-				buf_log.Infof("BUF: Next chunk for %d not found (%v) on deadline", sb.lastId, err)
+				buf_log.Infof("BUF (%v): Next chunk for %d not found (%v) on deadline", sb.id, sb.lastId, err)
+				//buf_log.Infof("BUF (%v): content %v", sb.id, sb.buf)
 				continue
 			}
 			sb.BufOut <- sb.buf[pos]
 			sb.lastId = nextId
-			buf_log.Debugf("BUF: Chunk %d sent by deadline", nextId)
+			buf_log.Debugf("BUF (%v): Chunk %d sent by deadline", sb.id, nextId)
 			// trigger send rest ready chunks
 			if sb.sendAny() {
 				deadline_ch = time.After(sb.deadline())
+			}
+		case cmd := <-sb.cmd_ch:
+			switch cmd.cmdId {
+			case sb_cmd_state:
+				buf_log.Debugf("BUF (%v): Got collect state %#v", sb.id, cmd)
+				cmd.resp <- sb.collectState()
+			case sb_cmd_latest_useful:
+				//buf_log.Debugf("BUF: Got latest useful")
+				cmd.resp <- sb.getLatestUseful(cmd.args.([]uint64))
+			case sb_cmd_latest:
+				//buf_log.Debugf("BUF: Got latest")
+				cmd.resp <- sb.getLatest()
+			default:
+				buf_log.Debugf("BUF (%v): Got undefined command %#v", sb.id, cmd)
 			}
 		}
 	}

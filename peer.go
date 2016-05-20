@@ -123,7 +123,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 
 	p.buf_input = make(chan *Chunk)
 
-	p.buf = NewBuffer(p.buf_input, p.Out, 5)
+	p.buf = NewBuffer(p.selfId, p.buf_input, p.Out, 10)
 
 	p.cmd_ch = make(chan command, 32)
 	p.quit = make(chan bool)
@@ -494,13 +494,13 @@ func (p *PeerImpl) handleCmdClose(cmd command) {
 	c := cmd.args.(*Connection)
 	p.log.Printf("Got closed connection %v", c)
 	if _, ok := p.sink_conn[c.ConnId]; ok {
-		p.log.Printf("Remove sink connection %v", c.ConnId)
+		p.log.Printf("Remove sink connection %v", c)
 		delete(p.sink_conn, c.ConnId)
 	} else if _, ok := p.src_conn[c.ConnId]; ok {
-		p.log.Printf("Remove src connection %v", c.ConnId)
+		p.log.Printf("Remove src connection %v", c)
 		delete(p.src_conn, c.ConnId)
 	} else {
-		p.log.Printf("Unexpected closed connection %v", c.ConnId)
+		p.log.Printf("Unexpected closed connection %v", c)
 	}
 }
 
@@ -511,18 +511,18 @@ func (p *PeerImpl) handleCmdOpen(cmd command) {
 	var storage map[string]*Connection
 
 	if c.ConnType == CONN_SEND {
-		p.log.Printf("Add connection %v type: sink", c.ConnId)
+		p.log.Printf("Add connection %v type: sink", c)
 		storage = p.sink_conn
 	} else if c.ConnType == CONN_RECV {
-		p.log.Printf("Add connection %v type: src", c.ConnId)
+		p.log.Printf("Add connection %v type: src", c)
 		storage = p.src_conn
 	}
 
 	if _, ok := storage[c.ConnId]; !ok {
-		p.log.Printf("Add connection %v", c.ConnId)
+		p.log.Printf("Add connection %v", c)
 		storage[c.ConnId] = c
 	} else {
-		p.log.Printf("connection %v already exists, close new", c.ConnId)
+		p.log.Printf("connection %v already exists, close new", c)
 		c.Close()
 	}
 }

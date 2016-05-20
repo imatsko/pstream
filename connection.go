@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"fmt"
 )
 
 var conn_log = logging.MustGetLogger("connection")
@@ -34,10 +35,7 @@ const (
 	conn_cmd_get_neighbours = 8
 	conn_cmd_flush_used = 9
 
-	CONN_SEND_TIMEOUT     = 2 * DEFAULT_STREAM_CHUNK_PERIOD
 	CONN_SEND_MSG_TIMEOUT = 1000 * time.Millisecond
-	CONN_SEND_DATA_TIMEOUT = 200 * time.Millisecond
-
 
 	CONN_UPDATE_PERIOD     = 5 * time.Second
 	CONN_ASK_UPDATE_PERIOD = 10 * time.Second
@@ -86,6 +84,10 @@ type command struct {
 	cmdId int
 	args  interface{}
 	resp  chan interface{}
+}
+
+func (c Connection) String() string {
+	return fmt.Sprintf("(CONN %v %v)", c.ConnId, c.PeerId)
 }
 
 type Connection struct {
@@ -169,13 +171,17 @@ func (c *Connection) Send(chunk *Chunk) bool {
 		args:  chunk,
 		resp:  resp_chan,
 	}
+
+	var res bool
 	select {
-	case <-resp_chan:
-		c.updateChunks(chunk.Id)
-		return true
-	case <-time.After(CONN_SEND_DATA_TIMEOUT):
-		return false
+	case r := <-resp_chan:
+		//c.updateChunks(chunk.Id)
+		res  = r.(bool)
 	}
+	if res {
+		c.updateChunks(chunk.Id)
+	}
+	return res
 }
 
 func (c *Connection) Buffer() *BufferState {
@@ -241,6 +247,23 @@ func (c *Connection) Serve() {
 			c.stream.Close()
 			//conn_log.Warningf("connection %d: quit received", c.ConnId)
 			return
+		case msg := <-c.in_msg:
+			switch msg.MsgType {
+			case PROTO_INIT:
+				c.handleMsgInit(msg)
+			case PROTO_DATA:
+				c.handleMsgData(msg)
+			case PROTO_ASK_UPDATE:
+				c.handleMsgAskUpdate(msg)
+			case PROTO_UPDATE:
+				c.handleMsgUpdate(msg)
+			case PROTO_UPDATE_CHUNK:
+				c.handleMsgUpdateChunk(msg)
+			case PROTO_CLOSE:
+				c.handleMsgClose(msg)
+			default:
+				c.handleUnexpected(msg)
+			}
 		case cmd := <-c.cmd_ch:
 			switch cmd.cmdId {
 			case conn_cmd_init:
@@ -263,24 +286,6 @@ func (c *Connection) Serve() {
 				c.handleCmdGetNeighbours(cmd)
 			default:
 				c.handleCmdUnexpected(cmd)
-			}
-		// pass
-		case msg := <-c.in_msg:
-			switch msg.MsgType {
-			case PROTO_INIT:
-				c.handleMsgInit(msg)
-			case PROTO_DATA:
-				c.handleMsgData(msg)
-			case PROTO_ASK_UPDATE:
-				c.handleMsgAskUpdate(msg)
-			case PROTO_UPDATE:
-				c.handleMsgUpdate(msg)
-			case PROTO_UPDATE_CHUNK:
-				c.handleMsgUpdateChunk(msg)
-			case PROTO_CLOSE:
-				c.handleMsgClose(msg)
-			default:
-				c.handleUnexpected(msg)
 			}
 		}
 	}
@@ -354,7 +359,10 @@ func (c *Connection) handleCmdInit(cmd command) {
 func (c *Connection) handleCmdClose(cmd command) {
 	//conn_log.Warningf("connection %d: Got close cmd", c.ConnId)
 	c.Peer.ConnectionClosed(c)
-	close(c.close)
+	_, not_closed := <- c.close
+	if not_closed {
+		close(c.close)
+	}
 }
 
 func (c *Connection) handleCmdSendData(cmd command) {
@@ -372,14 +380,15 @@ func (c *Connection) handleCmdSendData(cmd command) {
 	go func() {
 		m := confirmMessage{
 			msg:  &answer_msg,
-			conf: make(chan bool),
+			conf: make(chan bool,1),
 		}
 		c.out_msg <- m
+		conn_log.Warningf("%v: data send to sender", c)
+
 		select {
-		case <-m.conf:
-		case <-time.After(c.Peer.Buf().Period()):
+		case r := <-m.conf:
+			cmd.resp <- r
 		}
-		close(cmd.resp)
 	}()
 
 }
@@ -591,9 +600,14 @@ func (c *Connection) serveSend() {
 		case err = <-res:
 		case <-time.After(CONN_SEND_MSG_TIMEOUT):
 			err = errors.New("Message send timeout")
+			conn_log.Errorf("connection %d: msg err err %v", c.ConnId, err)
 		}
 		if conf_msg.conf != nil {
-			close(conf_msg.conf)
+			if err == nil {
+				conf_msg.conf <- true
+			} else {
+				conf_msg.conf <- false
+			}
 		}
 
 		if err != nil {

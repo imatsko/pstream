@@ -118,9 +118,9 @@ func (p *PeerImpl) handleSendDesired() {
 	go func() {
 		l := conn.LockSend()
 		if l {
-			p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn.ConnId)
+			p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn)
 			r := conn.Send(chunk)
-			p.log.Printf("Chunk %v to sink %v delivered %v", chunk.Id, conn.ConnId, r)
+			p.log.Printf("Chunk %v to sink %v delivered %v", chunk.Id, conn, r)
 			conn.UnlockSend()
 		}
 		p.sim_send.Release(1)
