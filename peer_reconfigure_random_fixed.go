@@ -5,13 +5,13 @@ import (
 	"fmt"
 )
 
-const PEER_FIXED_COUNT = 5
+const PEER_FIXED_COUNT = 7
 
 //========================================================
 // reconfigure sinks to fixed count
 //=======================================================
 func (p *PeerImpl) reconfigureNetworkFixedN() {
-	diff := (len(p.sink_conn) - PEER_FIXED_COUNT)
+	diff := (len(p.sink_conn) - p.peer_fixed_count)
 	if diff == 0 {
 		if rand.Intn(2) == 0 {
 			diff = 1

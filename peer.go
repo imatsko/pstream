@@ -104,6 +104,8 @@ type PeerImpl struct {
 	sink_conn map[string]*Connection
 	src_conn  map[string]*Connection
 
+	peer_fixed_count int
+
 	sim_send *Semaphore
 }
 
@@ -133,7 +135,9 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 	p.sink_conn = make(map[string]*Connection)
 	p.src_conn = make(map[string]*Connection)
 
-	p.sim_send = NewSemaphore(3)
+	p.peer_fixed_count = PEER_FIXED_COUNT
+
+	p.sim_send = NewSemaphore(5)
 	return p
 }
 
@@ -268,6 +272,8 @@ func (p *PeerImpl) Serve() {
 			p.handleSend()
 		case <-reconfigure_ticker:
 			p.handleCmdReconfigureNetwork(command{})
+//		default:
+//			p.handleSend()
 		}
 	}
 }

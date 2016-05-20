@@ -31,6 +31,7 @@ func (l *StringComaList) Set(v string) error {
 
 var Config = struct {
 	ConfFile      string  `json:"conf_file"`
+	Id        string  `json:"id"`
 	Listen        string  `json:"listen"`
 	Source        bool    `json:"source"`
 	SourceChunks  uint64  `json:"source_count"`
@@ -48,6 +49,7 @@ var Config = struct {
 	SourceFreq:    10,
 	SourceBitrate: 4,
 	PprofListen:   "",
+	Id: "",
 	SendRate:      100,
 	BootstrapList: StringComaList(make([]string, 0)),
 }
@@ -57,6 +59,8 @@ var configLogger, _ = logging.GetLogger("config")
 func init() {
 	flag.StringVar(&Config.ConfFile, "conf", Config.ConfFile, "Read config from conf file if it exists")
 	flag.StringVar(&Config.Listen, "listen", Config.Listen, "Listen on addr:port ")
+
+	flag.StringVar(&Config.Id, "id", Config.Id, "Custom id for peer")
 
 	flag.StringVar(&Config.PprofListen, "pprof", Config.PprofListen, "Listen pprof on addr:port ")
 
@@ -82,8 +86,12 @@ func init() {
 }
 
 func start_source() {
+	var id string
+	if Config.Id == "" {
+		id = "source_sender"
+	}
 
-	p1 := pstream.NewPeer("source_sender", Config.Listen, Config.SendRate)
+	p1 := pstream.NewPeer(id, Config.Listen, Config.SendRate)
 
 	in := p1.In
 	out := p1.Out
@@ -150,7 +158,7 @@ func start_source() {
 }
 
 func start_peer() {
-	p1 := pstream.NewPeer("", Config.Listen, Config.SendRate)
+	p1 := pstream.NewPeer(Config.Id, Config.Listen, Config.SendRate)
 	go p1.Serve()
 
 	go func() {

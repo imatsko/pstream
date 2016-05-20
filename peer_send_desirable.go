@@ -4,6 +4,7 @@ import (
 	"math"
 	_ "sort"
 	_ "time"
+	"time"
 )
 
 //========================================================
@@ -66,6 +67,7 @@ func select_random_proportionally(sinks []sink_rate) sink_rate {
 func (p *PeerImpl) handleSendDesired() {
 	acq := p.sim_send.TryAcquireOne()
 	if !acq {
+		//p.log.Printf("Send sim lock")
 		return
 	}
 
@@ -116,13 +118,11 @@ func (p *PeerImpl) handleSendDesired() {
 	chunk := selected_rate.latest_useful
 
 	go func() {
-		l := conn.LockSend()
-		if l {
-			p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn)
-			r := conn.Send(chunk)
-			p.log.Printf("Chunk %v to sink %v delivered %v", chunk.Id, conn, r)
-			conn.UnlockSend()
-		}
+		t1 := time.Now()
+		p.log.Printf("Send chunk %v to sink %v", chunk.Id, conn)
+		send, delivered := conn.Send(chunk)
+		t2 := time.Now()
+		p.log.Printf("Chunk %v to sink %v send %v delivered %v t_diff %v", chunk.Id, conn, send, delivered, t2.Sub(t1))
 		p.sim_send.Release(1)
 	}()
 }

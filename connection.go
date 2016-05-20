@@ -35,7 +35,8 @@ const (
 	conn_cmd_get_neighbours = 8
 	conn_cmd_flush_used     = 9
 
-	CONN_SEND_MSG_TIMEOUT = 1000 * time.Millisecond
+	CONN_SEND_MSG_TIMEOUT = 10000 * time.Millisecond
+	CONN_SEND_SIM_SEND_LOCK_TIMEOUT_MULT = 1
 
 	CONN_UPDATE_PERIOD     = 5 * time.Second
 	CONN_ASK_UPDATE_PERIOD = 10 * time.Second
@@ -164,7 +165,12 @@ func (c *Connection) UnlockSend() {
 	<-c.data_send_lock
 }
 
-func (c *Connection) Send(chunk *Chunk) bool {
+func (c *Connection) Send(chunk *Chunk) (send bool, delivered bool) {
+	l := c.LockSend()
+	if !l {
+		return false, false
+	}
+
 	resp_chan := make(chan interface{})
 	c.cmd_ch <- command{
 		cmdId: conn_cmd_send_data,
@@ -172,16 +178,17 @@ func (c *Connection) Send(chunk *Chunk) bool {
 		resp:  resp_chan,
 	}
 
-	var res bool
 	select {
 	case r := <-resp_chan:
-		//c.updateChunks(chunk.Id)
-		res = r.(bool)
+		c.UnlockSend()
+		return true, r.(bool)
+	case <-time.After(CONN_SEND_SIM_SEND_LOCK_TIMEOUT_MULT*c.Peer.Buf().Period()):
+		go func() {
+			<-resp_chan
+			c.UnlockSend()
+		}()
+		return false, false
 	}
-	if res {
-		c.updateChunks(chunk.Id)
-	}
-	return res
 }
 
 func (c *Connection) Buffer() *BufferState {
@@ -386,6 +393,9 @@ func (c *Connection) handleCmdSendData(cmd command) {
 
 		select {
 		case r := <-m.conf:
+			if r {
+				c.updateChunks(chunk.Id)
+			}
 			cmd.resp <- r
 		}
 	}()
