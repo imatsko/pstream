@@ -35,7 +35,7 @@ const (
 	conn_cmd_get_neighbours = 8
 	conn_cmd_flush_used     = 9
 
-	CONN_SEND_MSG_TIMEOUT = 10000 * time.Millisecond
+	CONN_SEND_MSG_TIMEOUT = 5000 * time.Millisecond
 	CONN_SEND_SIM_SEND_LOCK_TIMEOUT_MULT = 1
 
 	CONN_UPDATE_PERIOD     = 5 * time.Second
@@ -522,7 +522,7 @@ func (c *Connection) handleMsgData(msg ProtocolMessage) {
 	}
 
 	data := msg.Payload.(DataMessage)
-	c.Peer.InChunks() <- &data.Chunk
+	c.Peer.AddChunk(&data.Chunk)
 }
 
 func (c *Connection) handleMsgAskUpdate(msg ProtocolMessage) {

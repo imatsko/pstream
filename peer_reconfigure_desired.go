@@ -48,11 +48,11 @@ func (p *PeerImpl) reconfigureNetworkDesirable() {
 	//}
 
 	var unused_ratio float64
-	if len(used) <= PEER_MIN_SINKS {
-		unused_ratio = 0
-	} else {
+	//if len(used) <= PEER_MIN_SINKS {
+	//	unused_ratio = 0
+	//} else {
 		unused_ratio = float64(len(unused)) / float64(len(used))
-	}
+	//}
 
 	if unused_ratio < unused_low {
 		open_sink_count := int(math.Ceil(float64(len(used)) * growth))

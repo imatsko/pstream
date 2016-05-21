@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/op/go-logging"
-	"math"
+	_ "math"
 	"net"
 	"sync"
 	"time"
@@ -70,7 +70,7 @@ type Peer interface {
 	Neighbours() PeerNeighboursState
 	Buffer() BufferState
 	Buf() *Buffer
-	InChunks() chan<- *Chunk
+	AddChunk(c *Chunk)
 	ConnectionClosed(c *Connection)
 	ConnectionOpened(c *Connection)
 }
@@ -79,6 +79,7 @@ type PeerImpl struct {
 	log        *logger
 	selfId     string
 	listenAddr string
+	ExternalSource bool
 
 	Fake_recv bool
 
@@ -127,7 +128,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 
 	p.buf = NewBuffer(p.selfId, p.buf_input, p.Out, 10)
 
-	p.cmd_ch = make(chan command,5)
+	p.cmd_ch = make(chan command,50)
 	p.quit = make(chan bool)
 
 	p.conn_counter = 1
@@ -137,7 +138,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 
 	p.peer_fixed_count = PEER_FIXED_COUNT
 
-	p.sim_send = NewSemaphore(5)
+	p.sim_send = NewSemaphore(3)
 	return p
 }
 
@@ -200,7 +201,7 @@ func (p *PeerImpl) ServeSendRate2(rate float64) {
 	p.log.Printf("start rate %v", rate)
 
 	//p.rate_ch = make(chan bool)
-	p.rate_ch = make(chan bool, int(math.Ceil(rate)))
+	p.rate_ch = make(chan bool)
 	var prev float64
 	var count int64
 	for {
@@ -245,22 +246,30 @@ func (p *PeerImpl) Serve() {
 	for {
 		select {
 		case <-p.quit:
+			p.log.Printf("CMD QUIT")
 			return
 		case cmd := <-p.cmd_ch:
 			switch cmd.cmdId {
 			case peer_cmd_close:
+				p.log.Printf("CMD CLOSE")
 				p.handleCmdClose(cmd)
 			case peer_cmd_open:
+				p.log.Printf("CMD OPEN")
 				p.handleCmdOpen(cmd)
 			case peer_cmd_notify_update:
+				p.log.Printf("CMD NOTIFY")
 				p.handleCmdNotifyUpdate(cmd)
 			case peer_cmd_reconfigure_net:
+				p.log.Printf("CMD RECONFIGURE")
 				p.handleCmdReconfigureNetwork(cmd)
 			case peer_cmd_bootstrap_net:
+				p.log.Printf("CMD BOOTSTRAP")
 				p.handleCmdBootstrapNetwork(cmd)
 			case peer_cmd_net_stat:
+				p.log.Printf("CMD NETSTAT")
 				p.handleCmdNetworkStatus(cmd)
 			case peer_cmd_exit:
+				p.log.Printf("CMD EXIT")
 				p.handleCmdExit(cmd)
 			default:
 				p.handleCmdUnexpected(cmd)
@@ -268,6 +277,7 @@ func (p *PeerImpl) Serve() {
 		case <-p.rate_ch:
 			p.handleSend()
 		case <-reconfigure_ticker:
+			p.log.Printf("CMD RECONFIGURE TICKER")
 			p.handleCmdReconfigureNetwork(command{})
 		}
 	}
@@ -358,7 +368,9 @@ func (p *PeerImpl) handleCmdNotifyUpdate(cmd command) {
 	chunk_id := cmd.args.(uint64)
 	//p.log.Printf("Notify update %v", chunk_id)
 	for _, conn := range p.src_conn {
-		conn.SendUpdateChunk(chunk_id)
+		go func() {
+			go conn.SendUpdateChunk(chunk_id)
+		}()
 	}
 }
 
@@ -370,7 +382,7 @@ func (p *PeerImpl) handleCmdReconfigureNetwork(cmd command) {
 
 	go func() {
 		for _, conn := range p.sink_conn {
-			conn.FlushUsed()
+				conn.FlushUsed()
 		}
 	}()
 }
@@ -498,32 +510,32 @@ func (p *PeerImpl) handleCmdNetworkStatus(cmd command) {
 func (p *PeerImpl) handleCmdExit(cmd command) {
 	p.log.Printf("Do exit %v", cmd)
 
-	for _, c := range p.sink_conn {
-		c.Close()
+	for _, conn := range p.sink_conn {
+		conn.Close()
 	}
-	for _, c := range p.src_conn {
-		c.Close()
+	for _, conn := range p.src_conn {
+		conn.Close()
 	}
 	close(p.quit)
 }
 
 func (p *PeerImpl) handleCmdClose(cmd command) {
-	c := cmd.args.(*Connection)
-	p.log.Printf("Got closed connection %v", c)
-	if _, ok := p.sink_conn[c.ConnId]; ok {
-		p.log.Printf("Remove sink connection %v", c)
-		delete(p.sink_conn, c.ConnId)
-	} else if _, ok := p.src_conn[c.ConnId]; ok {
-		p.log.Printf("Remove src connection %v", c)
-		delete(p.src_conn, c.ConnId)
+	conn := cmd.args.(*Connection)
+	p.log.Printf("Got closed connection %v", conn)
+	if _, ok := p.sink_conn[conn.ConnId]; ok {
+		p.log.Printf("Remove sink connection %v", conn)
+		delete(p.sink_conn, conn.ConnId)
+	} else if _, ok := p.src_conn[conn.ConnId]; ok {
+		p.log.Printf("Remove src connection %v", conn)
+		delete(p.src_conn, conn.ConnId)
 	} else {
-		p.log.Printf("Unexpected closed connection %v", c)
+		p.log.Printf("Unexpected closed connection %v", conn)
 	}
 }
 
 func (p *PeerImpl) samePeerExists(collection map[string]*Connection, peerId string) bool {
-	for _, c := range collection {
-		if c.PeerId == peerId {
+	for _, conn := range collection {
+		if conn.PeerId == peerId {
 			return true
 		}
 	}
@@ -531,30 +543,30 @@ func (p *PeerImpl) samePeerExists(collection map[string]*Connection, peerId stri
 }
 
 func (p *PeerImpl) handleCmdOpen(cmd command) {
-	c := cmd.args.(*Connection)
-	p.log.Printf("Got new connection %v", c)
+	conn := cmd.args.(*Connection)
+	p.log.Printf("Got new connection %v", conn)
 
 	var storage map[string]*Connection
 
-	if c.ConnType == CONN_SEND {
-		p.log.Printf("Add connection %v type: sink", c)
+	if conn.ConnType == CONN_SEND {
+		p.log.Printf("Add connection %v type: sink", conn)
 		storage = p.sink_conn
-	} else if c.ConnType == CONN_RECV {
-		p.log.Printf("Add connection %v type: src", c)
+	} else if conn.ConnType == CONN_RECV {
+		p.log.Printf("Add connection %v type: src", conn)
 		storage = p.src_conn
 	}
 
-	if _, ok := storage[c.ConnId]; !ok {
-		if !p.samePeerExists(storage, c.PeerId) {
-			p.log.Printf("Add connection %v", c)
-			storage[c.ConnId] = c
+	if _, ok := storage[conn.ConnId]; !ok {
+		if !p.samePeerExists(storage, conn.PeerId) {
+			p.log.Printf("Add connection %v", conn)
+			storage[conn.ConnId] = conn
 		} else {
-			p.log.Printf("connection %v with same peeralready exists, close new", c)
-			c.Close()
+			p.log.Printf("connection %v with same peeralready exists, close new", conn)
+			conn.Close()
 		}
 	} else {
-		p.log.Printf("connection %v already exists, close new", c)
-		c.Close()
+		p.log.Printf("connection %v already exists, close new", conn)
+		conn.Close()
 	}
 }
 
@@ -595,21 +607,24 @@ func (p *PeerImpl) Buf() *Buffer {
 	return p.buf
 }
 
-func (p *PeerImpl) InChunks() chan<- *Chunk {
-	return p.In
+func (p *PeerImpl) AddChunk(c *Chunk) {
+	if p.ExternalSource {
+		return
+	}
+	p.In <- c
 }
 
-func (p *PeerImpl) ConnectionClosed(c *Connection) {
+func (p *PeerImpl) ConnectionClosed(conn *Connection) {
 	p.cmd_ch <- command{
 		cmdId: peer_cmd_close,
-		args:  c,
+		args:  conn,
 	}
 }
 
-func (p *PeerImpl) ConnectionOpened(c *Connection) {
+func (p *PeerImpl) ConnectionOpened(conn *Connection) {
 	p.cmd_ch <- command{
 		cmdId: peer_cmd_open,
-		args:  c,
+		args:  conn,
 	}
 }
 

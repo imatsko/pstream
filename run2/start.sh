@@ -86,8 +86,9 @@ while [ $COUNTER -le $MAX_NODES ]; do
     fi
 
     PEER_ID="peer_${CLASS}_${COUNTER}"
+    let PPROF=PORT+500
 
-    CMD="./$MAIN_PATH --listen :${PORT} --bootstrap $BOOTSTRAP --rate $RATE  --id ${PEER_ID}  2>&1 | tee ${LOG_DIR}/${PEER_ID}.log &"
+    CMD="./$MAIN_PATH --listen :${PORT} --bootstrap $BOOTSTRAP --rate $RATE  --id ${PEER_ID} --pprof :${PPROF} 2>&1 | tee ${LOG_DIR}/${PEER_ID}.log &"
     echo "$CMD"
 
     eval "$CMD"

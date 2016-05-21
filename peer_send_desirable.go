@@ -9,8 +9,17 @@ import (
 // send most useful to desired
 //=======================================================
 
-func desirability_fun(sink_count int) float64 {
+func desirability_sqrt(sink_count int) float64 {
 	return math.Max(math.Sqrt(float64(sink_count)), 1)
+}
+
+func desirability_proportional(sink_count int) float64 {
+	return float64(sink_count)
+}
+
+func desirability_fun(sink_count int) float64 {
+	return desirability_sqrt(sink_count)
+	//return desirability_proportional(sink_count)
 }
 
 func select_with_latest_useful(a []sink_rate) []sink_rate {
