@@ -15,9 +15,9 @@ const DEFAULT_STREAM_CHUNK_PERIOD = time.Millisecond * 100
 
 const (
 	PEER_MIN_SOURCES = 2
-	PEER_MIN_SINKS   = 1
+	PEER_MIN_SINKS   = 2
 
-	PEER_NETWORK_RECONFIGURE_PERIOD      = time.Second * 5
+	PEER_NETWORK_RECONFIGURE_PERIOD      = time.Second * 2
 	PEER_NETWORK_RECONFIGURE_PERIOD_INIT = time.Second * 1
 )
 
@@ -58,8 +58,8 @@ type PeerStat struct {
 }
 
 type PeerNeighboursState struct {
-	Sinks   []PeerStat
-	Sources []PeerStat
+	Sinks        []PeerStat
+	Sources      []PeerStat
 	Connectivity int
 }
 
@@ -234,10 +234,10 @@ func (p *PeerImpl) Serve() {
 	}
 
 	reconfigure_ticker := time.NewTicker(PEER_NETWORK_RECONFIGURE_PERIOD).C
-	go func() {
-		<-time.After(PEER_NETWORK_RECONFIGURE_PERIOD_INIT)
-		p.ReconfigureNetwork()
-	}()
+	//go func() {
+	//	<-time.After(PEER_NETWORK_RECONFIGURE_PERIOD_INIT)
+	//	p.ReconfigureNetwork()
+	//}()
 
 	//go p.ServeReconfigure(PEER_NETWORK_RECONFIGURE_PERIOD)
 
@@ -272,8 +272,8 @@ func (p *PeerImpl) Serve() {
 			p.handleSend()
 		case <-reconfigure_ticker:
 			p.handleCmdReconfigureNetwork(command{})
-//		default:
-//			p.handleSend()
+			//		default:
+			//			p.handleSend()
 		}
 	}
 }
@@ -318,31 +318,32 @@ func (p *PeerImpl) getConnNumber() int {
 	return new_num
 }
 
-func (p *PeerImpl) createSourceConnection(addr string) {
+func (p *PeerImpl) createSourceConnection(addr string) error {
 	p.log.Printf("Start source connection")
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		p.log.Printf("New source conneciton error %v", err)
-		return
+		return err
 	}
 
 	new_num := p.getConnNumber()
 
 	new_conn := NewConnection(fmt.Sprintf("%d", new_num), conn, CONN_RECV, p)
 	go new_conn.Serve()
-
+	return nil
 }
 
-func (p *PeerImpl) createSinkConnection(addr string) {
+func (p *PeerImpl) createSinkConnection(addr string) error {
 	p.log.Printf("Start sink connection")
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		p.log.Printf("New sink conneciton error %v", err)
-		return
+		return err
 	}
 	new_num := p.getConnNumber()
 	new_conn := NewConnection(fmt.Sprintf("%d", new_num), conn, CONN_SEND, p)
 	go new_conn.Serve()
+	return nil
 }
 
 func (p *PeerImpl) handleCmdNotifyUpdate(cmd command) {
@@ -356,9 +357,8 @@ func (p *PeerImpl) handleCmdNotifyUpdate(cmd command) {
 func (p *PeerImpl) handleCmdReconfigureNetwork(cmd command) {
 	p.log.Printf("Do reconfigure %v", cmd)
 
-	p.reconfigureNetworkFixedN()
-
-
+	//p.reconfigureNetworkFixedN()
+	p.reconfigureNetworkDesirable()
 
 	go func() {
 		for _, conn := range p.sink_conn {
@@ -410,8 +410,8 @@ func (p *PeerImpl) collectNetworkStatus() PeerNeighboursState {
 	sources := collect_from_map(p.src_conn)
 
 	return PeerNeighboursState{
-		Sources: sources,
-		Sinks:   sinks,
+		Sources:      sources,
+		Sinks:        sinks,
 		Connectivity: len(sinks),
 	}
 }

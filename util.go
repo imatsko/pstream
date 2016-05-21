@@ -4,8 +4,6 @@ import (
 	_ "fmt"
 	"math"
 	"math/rand"
-	_ "time"
-	_ "fmt"
 )
 
 type Selectable interface {
@@ -17,6 +15,10 @@ func SelectRandomItemProportionally(a []Selectable) Selectable {
 }
 
 func SelectRandomProportionally(a []Selectable, count int) []Selectable {
+	if count == 0 {
+		return make([]Selectable, 0)
+	}
+
 	list := make([]Selectable, len(a))
 	copy(list, a)
 

@@ -2,14 +2,16 @@ package pstream
 
 import (
 	"math"
-	_ "sort"
-	_ "time"
 	"time"
 )
 
 //========================================================
 // send most useful to desired
 //=======================================================
+
+func desirability_fun(sink_count int) float64 {
+	return math.Max(math.Sqrt(float64(sink_count)), 1)
+}
 
 func select_with_latest_useful(a []sink_rate) []sink_rate {
 	var max_id uint64
@@ -31,15 +33,16 @@ func select_with_latest_useful(a []sink_rate) []sink_rate {
 	return latest_useful
 }
 
-func desirability(n *PeerNeighboursState) float64 {
-	if n == nil {
-		peer_log.Infof("empty neighbours")
-		return 0
+func (n *PeerNeighboursState) desirability() float64 {
+
+	var sink_count int
+
+	if n != nil {
+		sink_count = len(n.Sinks)
 	}
 
-	power := len(n.Sinks)
+	return desirability_fun(sink_count)
 
-	return math.Max(math.Sqrt(float64(power)), 1)
 }
 
 type sink_rate struct {
@@ -101,7 +104,7 @@ func (p *PeerImpl) handleSendDesired() {
 		neighbours := conn.Neighbours()
 		//p.log.Printf("Sink %v neighbours %#v", conn.ConnId, neighbours)
 
-		des := desirability(neighbours)
+		des := neighbours.desirability()
 		//p.log.Printf("Sink %v desirability %v", conn.ConnId, des)
 
 		sinks = append(sinks, sink_rate{id: id, latest_useful: latest_useful, d: des})
