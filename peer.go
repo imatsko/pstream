@@ -127,7 +127,7 @@ func NewPeer(selfId string, listen string, rate float64) *PeerImpl {
 
 	p.buf = NewBuffer(p.selfId, p.buf_input, p.Out, 10)
 
-	p.cmd_ch = make(chan command, 32)
+	p.cmd_ch = make(chan command,5)
 	p.quit = make(chan bool)
 
 	p.conn_counter = 1
@@ -240,15 +240,12 @@ func (p *PeerImpl) Serve() {
 	//}()
 
 	//go p.ServeReconfigure(PEER_NETWORK_RECONFIGURE_PERIOD)
+	go p.ServeReceiveData()
 
 	for {
 		select {
 		case <-p.quit:
 			return
-		case chunk := <-p.In:
-			p.log.Printf("New chunk %d", chunk.Id)
-			p.buf_input <- chunk
-			p.NotifyUpdate(chunk.Id)
 		case cmd := <-p.cmd_ch:
 			switch cmd.cmdId {
 			case peer_cmd_close:
@@ -272,8 +269,19 @@ func (p *PeerImpl) Serve() {
 			p.handleSend()
 		case <-reconfigure_ticker:
 			p.handleCmdReconfigureNetwork(command{})
-			//		default:
-			//			p.handleSend()
+		}
+	}
+}
+
+func (p *PeerImpl) ServeReceiveData() {
+	for {
+		select {
+		case <-p.quit:
+			return
+		case chunk := <-p.In:
+			p.log.Printf("New chunk %d", chunk.Id)
+			p.buf_input <- chunk
+			p.NotifyUpdate(chunk.Id)
 		}
 	}
 }
