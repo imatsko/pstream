@@ -16,7 +16,7 @@ func (p *PeerImpl) reconfigureNetworkDesirable() {
 	unused_low := 0.1
 	growth := 0.3
 	add_sources := 1
-	add_sinks := 2
+	add_sinks := 1
 
 	used := make([]*Connection, 0)
 	unused := make([]*Connection, 0)

@@ -14,11 +14,11 @@ var conn_log = logging.MustGetLogger("connection")
 
 const (
 	PROTO_INIT         = 1
-	PROTO_UPDATE       = 2
-	PROTO_CLOSE        = 3
-	PROTO_DATA         = 4
+	PROTO_CLOSE        = 2
+	PROTO_UPDATE_CHUNK = 3
+	PROTO_UPDATE       = 4
 	PROTO_ASK_UPDATE   = 5
-	PROTO_UPDATE_CHUNK = 6
+	PROTO_DATA         = 6
 
 	CONN_UNDEFINED = 0
 	CONN_RECV      = 1
@@ -35,7 +35,9 @@ const (
 	conn_cmd_get_neighbours = 8
 	conn_cmd_flush_used     = 9
 
-	CONN_SEND_MSG_TIMEOUT = 5000 * time.Millisecond
+	CONN_SEND_MSG_TIMEOUT                = 5000 * time.Millisecond
+	CONN_RECV_MSG_TIMEOUT                = 8000 * time.Millisecond
+
 	CONN_SEND_SIM_SEND_LOCK_TIMEOUT_MULT = 1
 
 	CONN_UPDATE_PERIOD     = 5 * time.Second
@@ -111,21 +113,27 @@ type Connection struct {
 	log              *logging.Logger
 	cmd_ch           chan command
 	in_msg           chan ProtocolMessage
-	out_msg          chan confirmMessage
+	out_in_msg       chan confirmMessage
+	out_out_msg      chan confirmMessage
+	out_queue        *msg_priority_queue
 	close            chan bool
 	data_send_lock   chan bool
 }
 
 func NewConnection(id string, conn net.Conn, t int, peer Peer) *Connection {
 	c := new(Connection)
+	c.close = make(chan bool)
+
 	c.ConnId = id
 	c.stream = conn
 	c.Peer = peer
 	c.ConnType = t
 	c.cmd_ch = make(chan command, 2)
 	c.in_msg = make(chan ProtocolMessage)
-	c.out_msg = make(chan confirmMessage)
-	c.close = make(chan bool)
+	c.out_in_msg = make(chan confirmMessage)
+	c.out_out_msg = make(chan confirmMessage)
+	c.out_queue = NewPriorityQueue(c.out_in_msg, c.out_out_msg, 5, c.close)
+
 	c.data_send_lock = make(chan bool, 1)
 
 	return c
@@ -182,7 +190,7 @@ func (c *Connection) Send(chunk *Chunk) (send bool, delivered bool) {
 	case r := <-resp_chan:
 		c.UnlockSend()
 		return true, r.(bool)
-	case <-time.After(CONN_SEND_SIM_SEND_LOCK_TIMEOUT_MULT*c.Peer.Buf().Period()):
+	case <-time.After(CONN_SEND_SIM_SEND_LOCK_TIMEOUT_MULT * c.Peer.Buf().Period()):
 		go func() {
 			<-resp_chan
 			c.UnlockSend()
@@ -359,7 +367,7 @@ func (c *Connection) handleCmdInit(cmd command) {
 		MsgType: PROTO_INIT,
 		Payload: init,
 	}
-	c.out_msg <- confirmMessage{msg: &msg}
+	c.out_in_msg <- confirmMessage{msg: &msg}
 }
 
 func (c *Connection) handleCmdClose(cmd command) {
@@ -388,7 +396,7 @@ func (c *Connection) handleCmdSendData(cmd command) {
 			msg:  &answer_msg,
 			conf: make(chan bool, 1),
 		}
-		c.out_msg <- m
+		c.out_in_msg <- m
 		conn_log.Warningf("%v: data send to sender", c)
 
 		select {
@@ -440,7 +448,7 @@ func (c *Connection) handleCmdSendUpdate(cmd command) {
 		Payload: upd_msg,
 	}
 
-	c.out_msg <- confirmMessage{msg: &answer_msg}
+	c.out_in_msg <- confirmMessage{msg: &answer_msg}
 }
 
 func (c *Connection) handleCmdSendUpdateChunk(cmd command) {
@@ -453,7 +461,7 @@ func (c *Connection) handleCmdSendUpdateChunk(cmd command) {
 		MsgType: PROTO_UPDATE_CHUNK,
 		Payload: upd_msg,
 	}
-	c.out_msg <- confirmMessage{msg: &answer_msg}
+	c.out_in_msg <- confirmMessage{msg: &answer_msg}
 }
 
 func (c *Connection) handleCmdSendAskUpdate(cmd command) {
@@ -461,7 +469,7 @@ func (c *Connection) handleCmdSendAskUpdate(cmd command) {
 		MsgType: PROTO_ASK_UPDATE,
 	}
 
-	c.out_msg <- confirmMessage{msg: &msg}
+	c.out_in_msg <- confirmMessage{msg: &msg}
 }
 
 func (c *Connection) handleCmdFlushUsed(cmd command) {
@@ -491,9 +499,8 @@ func (c *Connection) handleMsgInit(msg ProtocolMessage) {
 	c.PeerHost = c.stream.RemoteAddr().(*net.TCPAddr).IP.String()
 	c.PeerPort = init.Port
 
-
 	if c.ConnType == CONN_UNDEFINED {
-	// passive
+		// passive
 		conn_log.Warningf("%v: Got init passive", c)
 		switch init.ConnType {
 		case CONN_RECV:
@@ -566,7 +573,6 @@ func (c *Connection) handleUnexpected(msg ProtocolMessage) {
 }
 
 func (c *Connection) serveRecv() {
-	// TODO read timeout
 	decoder := gob.NewDecoder(c.stream)
 	for {
 		select {
@@ -576,20 +582,96 @@ func (c *Connection) serveRecv() {
 			return
 		default:
 		}
-		var recvMessage ProtocolMessage
-		err := decoder.Decode(&recvMessage)
-		if err != nil {
-			if err.Error() == "EOF" {
-				//conn_log.Errorf("connection %d: input decode err %//v", c.ConnId, err)
-				//conn_log.Warningf("connection %d: Close connection by EOF", c.ConnId)
-				c.in_msg <- ProtocolMessage{MsgType: PROTO_CLOSE}
+
+		msg_chan := make(chan ProtocolMessage)
+		err_chan := make(chan error)
+
+
+		var err error
+		go func() {
+			var recvMessage ProtocolMessage
+			err := decoder.Decode(&recvMessage)
+			if err != nil {
+				err_chan <- err
+				return
 			}
-			conn_log.Errorf("connection %d: input decode err %//v", c.ConnId, err)
-			continue
+			msg_chan <- recvMessage
+		}()
+
+		select {
+		case err = <- err_chan:
+		case msg := <- msg_chan:
+			c.in_msg <- msg
+		case <-time.After(CONN_RECV_MSG_TIMEOUT):
+			err = errors.New("Receive timeout")
 		}
-		//conn_log.Debugf("connection %d: recv msg %//v", c.ConnId, recvMessage)
-		c.in_msg <- recvMessage
+
+		if err != nil {
+			conn_log.Errorf("%v: input err %v", c, err)
+			c.in_msg <- ProtocolMessage{MsgType: PROTO_CLOSE}
+		}
 	}
+}
+
+func NewPriorityQueue(in chan confirmMessage, out chan confirmMessage, size int, quit chan bool) *msg_priority_queue {
+	q := new(msg_priority_queue)
+	q.in = in
+	q.out = out
+	q.size = size
+	q.arr = make([]confirmMessage, 0, q.size)
+	q.quit = quit
+
+	go q.Serve()
+
+	return q
+}
+
+type msg_priority_queue struct {
+	arr  []confirmMessage
+	in   chan confirmMessage
+	out  chan confirmMessage
+	size int
+	quit chan bool
+}
+
+func (q *msg_priority_queue) Serve() {
+	for {
+		if len(q.arr) > 0 && len(q.arr) < q.size {
+			select {
+			case <-q.quit:
+				return
+			case q.out <- q.arr[0]:
+				q.arr = q.arr[1:]
+			case m := <-q.in:
+				q.Push(m)
+			}
+		} else if len(q.arr) > 0 {
+			select {
+			case <-q.quit:
+				return
+			case q.out <- q.arr[0]:
+				q.arr = q.arr[1:]
+			}
+		} else if len(q.arr) < q.size {
+			select {
+			case <-q.quit:
+				return
+			case m := <-q.in:
+				q.Push(m)
+			}
+		}
+	}
+}
+func (q *msg_priority_queue) Push(m confirmMessage) {
+	pos := 0
+	for pos < len(q.arr) && m.msg.MsgType <= q.arr[pos].msg.MsgType {
+		pos += 1
+	}
+
+	q.arr = append(q.arr[:pos], append([]confirmMessage{m}, q.arr[pos:]...)...)
+	new_arr := make([]confirmMessage, len(q.arr))
+	copy(new_arr, q.arr)
+	q.arr = new_arr
 }
 
 func (c *Connection) serveSend() {
@@ -602,7 +684,7 @@ func (c *Connection) serveSend() {
 		default:
 		}
 
-		conf_msg := <-c.out_msg
+		conf_msg := <-c.out_out_msg
 		sendMessage := *conf_msg.msg
 		//conn_log.Debugf("connection %d: send msg %//v", c.ConnId, sendMessage)
 

@@ -91,7 +91,7 @@ while [ $COUNTER -le $MAX_NODES ]; do
     CMD="./$MAIN_PATH --listen :${PORT} --bootstrap $BOOTSTRAP --rate $RATE  --id ${PEER_ID} --pprof :${PPROF} 2>&1 | tee ${LOG_DIR}/${PEER_ID}.log &"
     echo "$CMD"
 
-    eval "$CMD"
+    bash -c "ulimit -n 4069; $CMD"
     PIDS[$COUNTER]=$!
     PORTS[$COUNTER]=$PORT
     let COUNTER=COUNTER+1
