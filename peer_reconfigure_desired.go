@@ -29,7 +29,10 @@ func (p *PeerImpl) reconfigureNetworkDesirable() {
 		}
 	}
 
-	p.log.Printf("RECONFIGURE src %v sink: used %v unused %v tot %v", len(p.src_conn), len(used), len(unused), len(p.sink_conn))
+	p.log.Printf("RECONFIGURE %d src %v used %v unused %v tot %v", SinceDayStart(), len(p.src_conn), len(used), len(unused), len(p.sink_conn))
+	for _, conn := range p.sink_conn {
+		p.log.Printf("RECONFIGURE has conn %v", conn)
+	}
 
 	if len(p.src_conn) <= PEER_MIN_SOURCES {
 		new_src_count := PEER_MIN_SOURCES - len(p.src_conn) + add_sources

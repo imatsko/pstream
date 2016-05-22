@@ -14,7 +14,12 @@ import (
 	"time"
 
 	"net/http"
+
+	"os"
+	"os/signal"
+	"syscall"
 )
+
 
 var main_log = logging.MustGetLogger("Main")
 
@@ -89,9 +94,12 @@ func start_source() {
 	var id string
 	if Config.Id == "" {
 		id = "source_sender"
+	} else {
+		id = Config.Id
 	}
 
 	p1 := pstream.NewPeer(id, Config.Listen, Config.SendRate)
+	p1.ExternalSource = true
 
 	in := p1.In
 	out := p1.Out
@@ -100,6 +108,7 @@ func start_source() {
 	bytes_s := bitrate / 8
 
 	go p1.Serve()
+	main_log.Debugf("%d peer started", pstream.SinceDayStart()/time.Millisecond)
 
 	send := func() {
 		var chunk_size int
@@ -107,16 +116,18 @@ func start_source() {
 		period := time.Duration(uint64(time.Second) / uint64(Config.SourceFreq))
 
 		chunk_size = bytes_s / Config.SourceFreq
+		//chunk_size = chunk_size / 10
+		chunk_size = 10
 		for i := uint64(1); i <= Config.SourceChunks; i += 1 {
 			buf_data := make([]byte, chunk_size)
-			for i := 0; i < 100; i++ {
+			for i := 0; i < 10; i++ {
 				pos := rand.Intn(chunk_size)
 				buf_data[pos] = byte(i)
 			}
 
 			c := pstream.Chunk{uint64(i), period, &buf_data}
 			//c := pstream.Chunk{uint64(i), i}
-			main_log.Debugf("Sending %v", c.Id)
+			main_log.Debugf("%v Sending %v", time.Now(), c.Id)
 			in <- &c
 			main_log.Debugf("Sending %v finished", c.Id)
 			time.Sleep(period)
@@ -144,7 +155,7 @@ func start_source() {
 		for {
 			select {
 			case c := <-out:
-				main_log.Debugf("Received %v", c.Id)
+				main_log.Debugf("%d Received %v", pstream.SinceDayStart()/time.Millisecond, c.Id)
 			case <-time.After(time.Second * 30):
 				main_log.Debugf("No new packages too long")
 				p1.Exit()
@@ -161,6 +172,8 @@ func start_peer() {
 	p1 := pstream.NewPeer(Config.Id, Config.Listen, Config.SendRate)
 	go p1.Serve()
 
+	main_log.Debugf("%d peer started", pstream.SinceDayStart()/time.Millisecond)
+
 	go func() {
 		time.Sleep(time.Second)
 		p1.BootstrapNetwork([]string(Config.BootstrapList))
@@ -172,7 +185,7 @@ func start_peer() {
 		for {
 			select {
 			case c := <-out:
-				main_log.Debugf("Received %v", c.Id)
+				main_log.Debugf("%d Received %v", pstream.SinceDayStart()/time.Millisecond, c.Id)
 			case <-time.After(time.Second * 30):
 				main_log.Debugf("No new packages too long")
 				p1.Exit()
@@ -186,15 +199,33 @@ func start_peer() {
 func main() {
 	main_log.Infof("Start with config %+v", Config)
 
+	sigs := make(chan os.Signal, 1)
+	done := make(chan bool, 1)
+
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigs
+		fmt.Println()
+		fmt.Println(sig)
+		done <- true
+	}()
+
+
 	if Config.PprofListen != "" {
 		go func() {
 			log.Println(http.ListenAndServe(Config.PprofListen, nil))
 		}()
 	}
 
-	if Config.Source {
-		start_source()
-	} else {
-		start_peer()
-	}
+	go func(){
+		if Config.Source {
+			start_source()
+		} else {
+			start_peer()
+		}
+		done<-true
+	}()
+	<- done
+	main_log.Infof("Trminated")
 }

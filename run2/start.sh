@@ -20,7 +20,7 @@ elif [ $TYPE == "source" ]; then
     RATE=$3
 
     FREQUENCY=10
-    CHUNKS_COUNT=5000
+    CHUNKS_COUNT=3500
     BITRATE=1
     PEER_ID="source"
 

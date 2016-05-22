@@ -257,6 +257,12 @@ func (sb *Buffer) Serve() {
 				//buf_log.Infof("BUF (%v): content %v", sb.id, sb.buf)
 				continue
 			}
+			if sb.lastId != 0 {
+				for i := sb.lastId+1; i < nextId; i += 1 {
+					buf_log.Debugf("BUF (%v): Chunk %d skipped by deadline", sb.id, i)
+				}
+			}
+
 			sb.BufOut <- sb.buf[pos]
 			sb.lastId = nextId
 			buf_log.Debugf("BUF (%v): Chunk %d sent by deadline", sb.id, nextId)

@@ -4,6 +4,7 @@ import (
 	_ "fmt"
 	"math"
 	"math/rand"
+	"time"
 )
 
 type Selectable interface {
@@ -123,4 +124,14 @@ func (s *Semaphore) Release(n int) {
 	for i := 0; i < n; i += 1 {
 		<-s.c
 	}
+}
+
+func SinceDayStart() time.Duration {
+	t := time.Now()
+
+	year, month, day := t.Date()
+
+	day_start := time.Date(year, month, day, 0,0,0,0, t.Location())
+
+	return t.Sub(day_start)
 }
